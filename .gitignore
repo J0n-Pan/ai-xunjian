@@ -2,8 +2,17 @@ node_modules/
 .vite/
 dist/
 *.log
+
+# 工程产物目录：只保留作者的示例工程 episodes/demo，
+# 其余都是使用者自己的工程（含素材、字幕、渲染产物），不入版本控制。
+episodes/*
+!episodes/demo/
+
+# 示例工程内同样排除大文件与中间产物
 episodes/*/hf/assets/*.mp4
 episodes/*/renders/
+*.backup.json
+
 exports/
 effects-inbox/
 style-config.json
