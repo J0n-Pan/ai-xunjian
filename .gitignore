@@ -16,3 +16,11 @@ episodes/*/renders/
 exports/
 effects-inbox/
 style-config.json
+
+# 凭据与本地私有配置：防止 API Key / token 被误提交
+.env
+.env.*
+*.key
+*.pem
+.claude/
+settings.local.json
