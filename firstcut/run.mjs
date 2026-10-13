@@ -69,7 +69,7 @@ if (!NO_RETAKE) {
   const rawCaps = path.join(EP, "work/raw-caps.json");
   const rawSegsPath = path.join(EP, "work/raw-segs.json");
   run(FFMPEG, ["-y", "-v", "error", "-i", input, "-vn", "-ac", "1", "-ar", "16000", rawWav]);
-  const ra = run("uv", ["run", "--with", "faster-whisper", "python",
+  const ra = run("uv", ["run", "--with", "faster-whisper", "--with", "av<14", "python",
     path.join(ROOT, "firstcut/asr_and_caps.py"), rawWav, rawCaps,
     process.env.XUNJIAN_WHISPER_MODEL || "small", rawSegsPath]);
   if (ra.status === 0 && fs.existsSync(rawSegsPath)) {
@@ -119,7 +119,7 @@ step("转写逐字字幕");
 const capsPath = path.join(EP, "work/caps-full.json");
 const asrIn = path.join(EP, "work/asr-in.wav");
 run(FFMPEG, ["-y", "-v", "error", "-i", voice, "-ac", "1", "-ar", "16000", asrIn]);
-const asr = run("uv", ["run", "--with", "faster-whisper", "python",
+const asr = run("uv", ["run", "--with", "faster-whisper", "--with", "av<14", "python",
   path.join(ROOT, "firstcut/asr_and_caps.py"), asrIn, capsPath]);
 let caps = [];
 if (asr.status === 0 && fs.existsSync(capsPath)) {
@@ -149,7 +149,9 @@ if (!NO_AI && caps.length) {
   const prompt = fs.readFileSync(path.join(ROOT, "firstcut/ai-cut-prompt.md"), "utf8")
     .replaceAll("{{DUR}}", dur.toFixed(2)).replaceAll("{{EPISODE}}", NAME).replaceAll("{{CAM}}", camName)
     .replaceAll("{{BOXES}}", JSON.stringify(boxes)).replaceAll("{{CAPTIONS}}", JSON.stringify(caps));
-  const ai = runCli(LLM, ["-p", "--output-format", "text"], { input: prompt, timeout: 300000 });
+  // 超时放宽到 15 分钟：GLM-5.3 等推理型网关对结构化任务可能耗时 5 分钟以上，
+  // 原来 300000(5min) 会把还没输出完的进程 SIGTERM 掉 → stdout 为空 → 误判"AI 输出解析失败"。
+  const ai = runCli(LLM, ["-p", "--output-format", "text"], { input: prompt, timeout: 900000 });
   const out = ai.stdout || "";
   const j0 = out.indexOf("{"), j1 = out.lastIndexOf("}");
   try {

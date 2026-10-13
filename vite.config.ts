@@ -191,8 +191,15 @@ const ARCHIVE_ROOT = process.env.XUNJIAN_ARCHIVE || path.join(process.cwd(), "ex
 const renderStates: Record<string, RenderState> = {};
 
 const safeEp = (ep: string | null): string | null => {
-  if (!ep || !/^[\w.-]+$/.test(ep)) return null; // 防路径穿越
-  const dir = path.join(episodesRoot, ep);
+  // 防路径穿越：禁止空、分隔符、..、控制字符（原来的 /^[\w.-]+$/ 会把中文工程名一律判非法）
+  if (!ep || ep === "." || ep === "..") return null;
+  if (/[\/\\]/.test(ep)) return null;
+  if (ep.includes("..")) return null;
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000-\u001f\u007f]/.test(ep)) return null;
+  const root = path.resolve(episodesRoot);
+  const dir = path.resolve(root, ep);
+  if (dir !== root && !dir.startsWith(root + path.sep)) return null; // 兜底：必须落在 episodes 内
   return fscore.existsSync(path.join(dir, "timeline.json")) ? dir : null;
 };
 

@@ -46,7 +46,13 @@ for c in caps:
     for bad, good in FIXES:
         c["z"] = c["z"].replace(bad, good)
 
-json.dump(caps, open(out, "w"), ensure_ascii=False, indent=1)
+# Windows 下 open() 默认按本地编码(GBK/cp936)写盘，会把中文字幕写成乱码；
+# 这里统一以 UTF-8 写出，与 run.mjs 的 readFileSync(..., "utf8") 对齐。
+def dump_json(obj, path):
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(obj, f, ensure_ascii=False, indent=1)
+
+dump_json(caps, out)
 if segs_out:
-    json.dump(raw_segs, open(segs_out, "w"), ensure_ascii=False, indent=1)
+    dump_json(raw_segs, segs_out)
 print(f"ASR_DONE lines={len(caps)} dur={caps[-1]['e'] if caps else 0}")

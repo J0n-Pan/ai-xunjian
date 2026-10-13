@@ -203,7 +203,7 @@ function App() {
   const undoRef = useRef<{tl: Timeline | null; caps: Cap[] | null}[]>([]);
   const redoRef = useRef<{tl: Timeline | null; caps: Cap[] | null}[]>([]);
 
-  const dur = tl?.meta.dur || 0;
+  const dur = tl?.meta?.dur || 0;
   const tickStep = pps >= 45 ? 1 : pps >= 14 ? 5 : 10;
   useEffect(() => { tlRef.current = tl; }, [tl]);
   useEffect(() => { capsRef.current = caps; }, [caps]);
@@ -261,7 +261,7 @@ function App() {
 
   useEffect(() => {
     if (!ep) return;
-    fetch(`/api/timeline?ep=${ep}`).then((r) => r.json()).then((data) => { setTl(data); setDirty(false); setSel(null); });
+    fetch(`/api/timeline?ep=${ep}`).then((r) => { if (!r.ok) throw new Error("timeline " + r.status); return r.json(); }).then((data) => { setTl(data); setDirty(false); setSel(null); }).catch(() => { setTl(null); setSel(null); });
     fetch(`/api/caps?ep=${ep}`).then((r) => r.json()).then((data) => { setCaps(Array.isArray(data) ? data : null); setCapsDirty(false); }).catch(() => setCaps(null));
     loadAssets();
   }, [ep, loadAssets]);
