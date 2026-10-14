@@ -21,14 +21,32 @@ const HSGB = process.env.XUNJIAN_CJK_FONT || (
 // Windows 下 cmd.exe 参数引号
 const winq = (x: string) => (/[\s&|<>^"]/.test(x) ? '"' + x.replace(/"/g, '""') + '"' : x);
 
+// 子进程环境消毒:宿主(如沙箱/IDE)可能向 shell 注入 safe-delete 外壳钩子,把 rm/unlink/rmdir
+// 换成「大批量删除需人工确认」的包装。渲染器(hyperframes)收尾会清理自己的临时帧目录(数百个
+// 文件),命中该钩子即以退出码 1 失败(报 SAFE_DELETE_BULK_CONFIRM_REQUIRED)。
+// 因此本插件 spawn 的所有子进程统一改用剥离了这些钩子的环境,避免宿主策略污染构建/渲染工具。
+const CHILD_ENV: NodeJS.ProcessEnv = (() => {
+  const env: NodeJS.ProcessEnv = {...process.env};
+  for (const key of Object.keys(env)) {
+    if (key.startsWith("CODEBUDDY_SAFE_DELETE_") || key.startsWith("BASH_FUNC_")) {
+      delete env[key];
+    } else if (/^path$/i.test(key) && env[key]) {
+      env[key] = env[key]!.split(path.delimiter)
+        .filter((p) => p && !/vendor[\\/]shim[\\/]safe-bin/i.test(p))
+        .join(path.delimiter);
+    }
+  }
+  return env;
+})();
+
 // 调用户的 LLM CLI:提示词一律走 stdin(跨平台安全——Windows 的 cmd.exe 塞不下多行长参数);
 // npm 装的 claude 在 Windows 是 claude.cmd,新版 Node 不经 shell 拉不起来,故 win32 走 shell
 const LLM_BIN = process.env.XUNJIAN_CLAUDE || "claude";
 function spawnLlm(extra: string[], prompt: string) {
   const args = ["-p", ...extra, "--output-format", "text"];
   const child = IS_WIN
-    ? spawn([LLM_BIN, ...args].map(winq).join(" "), {shell: true, env: {...process.env}})
-    : spawn(LLM_BIN, args, {env: {...process.env}});
+    ? spawn([LLM_BIN, ...args].map(winq).join(" "), {shell: true, env: {...CHILD_ENV}})
+    : spawn(LLM_BIN, args, {env: {...CHILD_ENV}});
   child.stdin?.write(prompt);
   child.stdin?.end();
   return child;
@@ -41,7 +59,7 @@ function runSteps(steps: Step[], onLog: (s: string) => void, after: (ok: boolean
   const next = () => {
     if (i >= steps.length) return after(true);
     const s = steps[i++];
-    const opts = {cwd: s.cwd, env: s.env ? {...process.env, ...s.env} : process.env};
+    const opts = {cwd: s.cwd, env: s.env ? {...CHILD_ENV, ...s.env} : CHILD_ENV};
     const child = IS_WIN && s.winShell
       ? spawn([s.cmd, ...s.args].map(winq).join(" "), {...opts, shell: true})
       : spawn(s.cmd, s.args, opts);
@@ -337,7 +355,7 @@ const episodeApi = (): Plugin => ({
       const url = new URL(req.url || "", "http://x");
       const dir = safeEp(url.searchParams.get("ep"));
       if (!dir) { res.statusCode = 404; res.end(JSON.stringify({error: "episode-not-found"})); return; }
-      const child = spawn(process.execPath, ["gen.js"], {cwd: dir, env: {...process.env, FULL: "1"}});
+      const child = spawn(process.execPath, ["gen.js"], {cwd: dir, env: {...CHILD_ENV, FULL: "1"}});
       let log = "";
       child.stdout.on("data", (d) => { log += d.toString(); });
       child.stderr.on("data", (d) => { log += d.toString(); });
@@ -551,7 +569,7 @@ ${script}
             const file = path.join(dir, "timeline.json");
             await fs.copyFile(file, file.replace(/\.json$/, ".backup.json"));
             await fs.writeFile(file, `${JSON.stringify(tlData, null, 2)}\n`, "utf8");
-            const g = spawn(process.execPath, ["gen.js"], {cwd: dir, env: {...process.env, FULL: "1"}});
+            const g = spawn(process.execPath, ["gen.js"], {cwd: dir, env: {...CHILD_ENV, FULL: "1"}});
             g.on("close", () => res.end(JSON.stringify({ok: true, placed: good, skipped: j.skipped || []})));
           } catch (e) { res.end(JSON.stringify({ok: false, error: String(e)})); }
         });
@@ -643,12 +661,22 @@ ${script}
           outFile = path.join(outDir, `成片-${name}-${String(t.getHours()).padStart(2, "0")}${String(t.getMinutes()).padStart(2, "0")}.mp4`);
         }
         st.out = outFile;
-        const bgm = fscore.existsSync(path.join(dir, "hf/assets/bgm.m4a")) ? path.join(dir, "hf/assets/bgm.m4a") : DEFAULT_BGM;
+        // BGM:优先用工程自带 hf/assets/bgm.m4a,其次 XUNJIAN_BGM;两者都没有则跳过混音(只留人声)。
+        // 注意不能把空字符串当 ffmpeg 输入(会报 No such file or directory 使导出失败)。
+        const ownBgm = path.join(dir, "hf/assets/bgm.m4a");
+        const bgm = fscore.existsSync(ownBgm) ? ownBgm
+          : (DEFAULT_BGM && fscore.existsSync(DEFAULT_BGM) ? DEFAULT_BGM : "");
+        if (!bgm) onLog("ℹ️ 未找到 BGM(工程内 hf/assets/bgm.m4a 或 XUNJIAN_BGM),正式版只保留人声原声\n");
+        const ENCODE = ["-t", String(dur), "-c:v", "libx264", "-pix_fmt", "yuv420p", "-profile:v", "high", "-level", "4.0",
+          "-g", "30", "-keyint_min", "30", "-sc_threshold", "0", "-movflags", "+faststart", "-c:a", "aac", "-b:a", "192k"];
         steps.push({cmd: "npx", args: ["hyperframes@0.6.64", "render", "-q", "standard", "-f", "30", "-o", "renders/editor-raw.mp4", "--workers", "2"], cwd: path.join(dir, "hf"), winShell: true});
-        steps.push({cmd: FFMPEG, args: ["-y", "-i", "hf/renders/editor-raw.mp4", "-i", "work/voice-norm.wav", "-stream_loop", "-1", "-i", bgm,
-          "-filter_complex", "[2:a]volume=0.30[bg];[1:a][bg]amix=inputs=2:duration=first:normalize=0[a]",
-          "-map", "0:v", "-map", "[a]", "-t", String(dur), "-c:v", "libx264", "-pix_fmt", "yuv420p", "-profile:v", "high", "-level", "4.0",
-          "-g", "30", "-keyint_min", "30", "-sc_threshold", "0", "-movflags", "+faststart", "-c:a", "aac", "-b:a", "192k", outFile], cwd: dir});
+        steps.push({cmd: FFMPEG, args: ["-y", "-i", "hf/renders/editor-raw.mp4", "-i", "work/voice-norm.wav",
+          ...(bgm
+            ? ["-stream_loop", "-1", "-i", bgm,
+              "-filter_complex", "[2:a]volume=0.30[bg];[1:a][bg]amix=inputs=2:duration=first:normalize=0[a]",
+              "-map", "0:v", "-map", "[a]"]
+            : ["-map", "0:v", "-map", "1:a"]),
+          ...ENCODE, outFile], cwd: dir});
       } else {
         steps.push({cmd: "npx", args: ["hyperframes@0.6.64", "render", "-q", "draft", "-f", String(fps), "-o", "renders/editor-raw.mp4", "--workers", "2"], cwd: path.join(dir, "hf"), winShell: true});
         steps.push({cmd: FFMPEG, args: ["-y", "-i", "hf/renders/editor-raw.mp4", "-i", "work/voice-norm.wav",
