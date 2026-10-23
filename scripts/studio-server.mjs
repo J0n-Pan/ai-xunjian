@@ -1336,4 +1336,28 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, "127.0.0.1", () => {
   console.log(`\n  剪辑台 → http://127.0.0.1:${PORT}\n`);
+  // 免安装包靠这个开关在服务起来之后再开浏览器，避免用户看到"无法访问"白页
+  if (process.env.XUNJIAN_OPEN_BROWSER === "1") openBrowser(`http://127.0.0.1:${PORT}`);
 });
+
+// 端口占用不是异常：多半是用户双击了两次启动器，此时把已有实例的页面打开就行，
+// 否则窗口里只有一段 EADDRINUSE 堆栈，看起来像"程序坏了"。
+server.on("error", (e) => {
+  if (e.code === "EADDRINUSE") {
+    console.log(`\n  端口 ${PORT} 已被占用：剪辑台可能已经在运行 → http://127.0.0.1:${PORT}\n`);
+    if (process.env.XUNJIAN_OPEN_BROWSER === "1") openBrowser(`http://127.0.0.1:${PORT}`);
+    setTimeout(() => process.exit(0), 400);
+    return;
+  }
+  console.error(`\n  服务启动失败：${e.message || e}\n`);
+  process.exit(1);
+});
+
+function openBrowser(url) {
+  const opt = { detached: true, stdio: "ignore" };
+  try {
+    if (process.platform === "win32") spawn("cmd", ["/c", "start", "", url], opt).unref();
+    else if (process.platform === "darwin") spawn("open", [url], opt).unref();
+    else spawn("xdg-open", [url], opt).unref();
+  } catch { /* 打不开浏览器不算错误，地址已经打印在窗口里了 */ }
+}
