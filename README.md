@@ -16,6 +16,17 @@
 
 ---
 
+## 下载
+
+**Windows x64 免安装版**：[`AI-FirstCut-Studio-1.0.0-win-x64.zip`](https://github.com/J0n-Pan/ai-xunjian/releases/latest)
+（约 105 MB）—— 解压即用，内置 Node 22 / FFmpeg 6.1 / uv，**不用另装任何环境**；
+双击 `启动 AI初剪工作台.cmd` 即开。详见 [v1.0.0 发布说明](https://github.com/J0n-Pan/ai-xunjian/releases/tag/v1.0.0)。
+
+从源码跑见下面「② 这个东西怎么用」；只要初剪引擎（不带 React 编辑器）的话用快照仓库
+[`ai-firstcut`](https://github.com/J0n-Pan/ai-firstcut)，同一个包也发在那儿。
+
+---
+
 ## ① 这个东西能干什么
 
 一句话：**把一段口播原片丢进来，AI 自动剪成带动效的初剪；剪得不满意的每一处，你都能在可视化编辑器里直接改。**
