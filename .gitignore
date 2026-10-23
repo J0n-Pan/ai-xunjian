@@ -17,9 +17,22 @@ exports/
 effects-inbox/
 style-config.json
 
+# 剪辑台上传的素材（原片副本，可能上 GB）
+uploads/
+
+# 本地探针脚本跑出来的测试素材与临时 Chrome profile
+tmp/
+
+# 一次性调试件的产物：scripts/_* 与 design/_* 是随手跑的探针/截图，别进仓库
+scripts/_*
+design/_*
+__pycache__/
+*.pyc
+
 # 凭据与本地私有配置：防止 API Key / token 被误提交
 .env
 .env.*
+!.env.example
 *.key
 *.pem
 .claude/

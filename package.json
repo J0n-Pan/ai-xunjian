@@ -7,7 +7,8 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 5178 --strictPort",
     "setup": "node scripts/setup-demo.mjs",
-    "build": "vite build"
+    "build": "vite build",
+    "studio": "node scripts/studio-server.mjs"
   },
   "dependencies": {
     "gsap": "^3.14.2",

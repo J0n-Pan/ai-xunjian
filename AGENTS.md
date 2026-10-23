@@ -18,8 +18,9 @@ AI驯剪（ai-xunjian）：开源 AI 短视频剪辑系统。两个模块：
 |---|---|---|---|
 | Node.js ≥ 20 | `node -v` | ✅ 必装 | macOS: `brew install node`；Windows: `winget install OpenJS.NodeJS.LTS`；Linux: 发行版包管理器或 nvm |
 | ffmpeg | `ffmpeg -version` | ✅ 必装 | macOS: `brew install ffmpeg`；Windows: `winget install Gyan.FFmpeg`（或 `choco install ffmpeg`）；Linux: `sudo apt install ffmpeg` |
-| uv | `uv --version` | 推荐（转写字幕、剪重说、字幕字体子集化都靠它） | macOS/Linux: `curl -LsSf https://astral.sh/uv/install.sh \| sh`；Windows: `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 \| iex"` |
-| LLM CLI | `claude --version` | 推荐（AI 初剪 / ✨AI 动效 / 🪄AI 排素材） | `npm install -g @anthropic-ai/claude-code` 后 `claude` 登录；已有其它兼容 CLI 可设 `XUNJIAN_CLAUDE` 指向它 |
+| 阿里云百炼 Key | 检查 `.env` 里有没有 `DASHSCOPE_API_KEY` | 推荐（转写 + 语义裁决共用） | 让用户去 https://bailian.console.aliyun.com/ 开通（**需实名认证**），`cp .env.example .env` 后填入。没有也能跑，会自动回落本地 faster-whisper |
+| uv | `uv --version` | 推荐（跑 Python 侧转写/字幕；云端转写也靠它托管依赖） | macOS/Linux: `curl -LsSf https://astral.sh/uv/install.sh \| sh`；Windows: `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 \| iex"` |
+| LLM CLI | `claude --version` | 仅编辑器侧 🪄AI 排素材需要 | `npm install -g @anthropic-ai/claude-code` 后 `claude` 登录；已有其它兼容 CLI 可设 `XUNJIAN_CLAUDE` 指向它。**firstcut 流水线本身不再依赖它** |
 | 中文字体 | 无需检查 | 自动 | macOS（冬青黑体）/ Windows（微软雅黑）系统自带自动用；Linux: `sudo apt install fonts-noto-cjk` 或设 `XUNJIAN_CJK_FONT=/path/字体.ttc` |
 
 ⚠️ Windows 装完工具后 PATH 不会立刻生效——提醒用户**重开终端**（或你重新起一个 shell）再验证。

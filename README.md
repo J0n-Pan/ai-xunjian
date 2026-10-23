@@ -33,7 +33,7 @@
 | **剪重说** | 说错→停顿→重说？自动识别紧挨着的重复句，剪掉说废的前一遍、保留重说的后一遍，打印剪除清单供核对 |
 | 提速 | 默认 1.2x（口播视频的舒适语速），可调 |
 | 响度归一 | 广播级 loudnorm，声音大小稳定 |
-| **转写字幕** | faster-whisper 词级时间戳，自动切成 ≤14 字/行的逐字字幕 |
+| **转写字幕** | 云端 ASR（paraformer-v2，字级真实时间戳），自动切成 ≤14 字/行的逐字字幕；也可切本地 faster-whisper 完全离线 |
 | **AI 初剪** | AI 通读字幕，按语义自动上章节、弹字、动效卡片（调用你自己的 LLM CLI） |
 
 ### 🎛 AI 视频编辑器 —— 你负责说了算
@@ -72,7 +72,15 @@ flowchart LR
 
 ## ② 这个东西怎么用
 
-**环境**：Node.js ≥ 20 · [ffmpeg](https://ffmpeg.org/)（`brew install ffmpeg`）· 转写需 [uv](https://docs.astral.sh/uv/)（可选）· AI 初剪需任意 LLM CLI 如 [Claude Code](https://claude.com/claude-code)（可选）
+**环境**：Node.js ≥ 20 · [ffmpeg](https://ffmpeg.org/)（`brew install ffmpeg`）· 一个 [阿里云百炼](https://bailian.console.aliyun.com/) API Key（转写与语义裁决共用；**需实名认证**）
+
+```bash
+cp .env.example .env      # 填入 DASHSCOPE_API_KEY=sk-xxx
+```
+
+> 🔒 **音频会上传云端**。不想上传就设 `XUNJIAN_ASR_PROVIDER=local`，改用本地 faster-whisper：
+> 完全离线、不花转写费，但首次要下载约 928MB 模型，且中文短句的漏字/跳读比云端多。
+> 语义裁决（qwen-plus）**始终**是把文字发到云端，不发音频。
 
 > 🤖 **不想手动装环境？让 AI 帮你装。** clone 本仓库后，在仓库目录里打开你的 AI 编程助手（Claude Code / Codex / Cursor 都行），把下面这句话发给它：
 >
@@ -117,7 +125,7 @@ node firstcut/run.mjs 原片.mp4 --no-retake         # 关掉重说检测（发�
 node firstcut/run.mjs 原片.mp4 --retake-sim 0.9    # 重说判定更严格（默认 0.8，越高越保守）
 ```
 
-> 没装 uv / LLM CLI 也能用：引擎会优雅降级成"剪气口+提速+骨架工程"，字幕和动效在编辑器里用 ✨AI 按钮或手动补。
+> 没有 key 也能用：引擎会自动回落到本地 faster-whisper，再不行就优雅降级成"剪气口+提速+骨架工程"，字幕和动效在编辑器里用 ✨AI 按钮或手动补。
 
 ### 第三步：定剪与导出
 
@@ -134,9 +142,12 @@ node firstcut/run.mjs 原片.mp4 --retake-sim 0.9    # 重说判定更严格（�
 
 | 变量 | 作用 | 默认 |
 |---|---|---|
-| `XUNJIAN_FFMPEG` / `XUNJIAN_CLAUDE` | ffmpeg / LLM CLI 路径 | PATH 里的 `ffmpeg` / `claude` |
+| `DASHSCOPE_API_KEY` | 云端转写 + 语义裁决（一个 key 通吃） | 无（缺失则回落本地） |
+| `XUNJIAN_ASR_PROVIDER` | `auto` / `cloud` / `local` | `auto` |
+| `XUNJIAN_LLM_BASE` / `XUNJIAN_LLM_MODEL` | 换 LLM 厂商 | 百炼兼容端点 / `qwen-plus` |
+| `XUNJIAN_FFMPEG` | ffmpeg 路径 | PATH 里的 `ffmpeg` |
 | `XUNJIAN_EPISODES` / `XUNJIAN_ARCHIVE` | 工程目录 / 导出目录 | `./episodes` / `./exports` |
-| `XUNJIAN_WHISPER_MODEL` | 转写模型 | `small` |
+| `XUNJIAN_WHISPER_MODEL` | 本地转写模型（仅 provider=local） | `small` |
 | `XUNJIAN_CJK_FONT` | 中文字体（字幕子集化） | macOS 苹方黑体 |
 
 ## ③ 它的价值是什么
@@ -147,7 +158,9 @@ node firstcut/run.mjs 原片.mp4 --retake-sim 0.9    # 重说判定更严格（�
 
 **3. 真实生产管线，不是玩具。** 这套系统是作者每天实际出片在用的：剪气口的参数、响度标准、字幕断行规则、组件的手机安全区，都是几十条真实短视频喂出来的。你拿到的是能直接上生产的东西。
 
-**4. 完全本地 + 自带 AI 接口。** 视频不上传任何服务器；AI 能力通过你自己的 LLM CLI 接入，用谁家模型、花多少钱，你自己定。
+**4. 默认走云端，但随时能退回本地。** 转写走阿里云百炼（音频会上传，一次性签名链接、2.6 小时后失效），
+语义裁决只发文字、不发音频。介意上传就设 `XUNJIAN_ASR_PROVIDER=local`，改用本地 faster-whisper
+完全离线跑——代价是首次下载约 928MB 模型，且短句漏字比云端多。用谁家模型、花多少钱，你自己定。
 
 ## 🗺 Roadmap
 
