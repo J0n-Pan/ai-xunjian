@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>AI初剪工作台</title>
+<link rel="stylesheet" href="/app.css" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+</head>
+<body>
+<div class="board">
+
+  <div class="main">
+    <header class="topbar">
+      <div class="ttl"><img class="tmark" src="/logo.png" alt="" width="56" height="20" />AI初剪工作台
+        <span class="projwrap">
+          <select id="projSel" class="projsel" title="切换素材">
+            <option value="">暂无素材</option>
+          </select>
+        </span>
+      </div>
+      <div class="steps" id="steps">
+        <div class="step" data-k="upload"><i class="dot"></i>上传</div><i>›</i>
+        <div class="step" data-k="asr"><i class="dot"></i>转写</div><i>›</i>
+        <div class="step" data-k="judge"><i class="dot"></i>裁决</div><i>›</i>
+        <div class="step" data-k="review"><i class="dot"></i>审核</div><i>›</i>
+        <div class="step" data-k="export"><i class="dot"></i>导出</div>
+      </div>
+      <div class="grow"></div>
+      <div class="pill"><i class="live off" id="keyDot"></i>API <b id="keyState">未配置</b></div>
+      <button class="btn" id="btnAiCut" title="对原片重新跑一轮 AI 剪辑，可附一句补充要求">
+        <svg viewBox="0 0 24 24"><path d="M12 3l1.9 4.6L18.5 9.5l-4.6 1.9L12 16l-1.9-4.6L5.5 9.5l4.6-1.9L12 3z"/><path d="M18 15l.9 2.1L21 18l-2.1.9L18 21l-.9-2.1L15 18l2.1-.9L18 15z"/></svg>AI 剪辑
+      </button>
+      <button class="btn" id="btnRevealOut">
+        <svg viewBox="0 0 24 24"><path d="M12 3v12m0 0l-3-3m3 3l3-3M4 19h16"/></svg>打开成片
+      </button>
+    </header>
+
+    <div class="body">
+
+      <!-- ═══ 左栏 ═══ -->
+      <section class="col left">
+
+        <div class="card">
+          <h3><span class="num">1</span>上传视频</h3>
+          <div class="drop" id="drop">
+            <div class="up"><svg viewBox="0 0 24 24"><path d="M12 16V4m0 0L7 9m5-5l5 5M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"/></svg></div>
+            <p>拖入视频，或 <b>点击选择</b></p>
+            <small>MP4 / MOV / MKV · 自动识别竖屏</small>
+          </div>
+          <input type="file" id="fileInput" accept="video/*" hidden />
+          <div class="file" id="fileCard" hidden>
+            <div class="thumb"><i></i></div>
+            <div class="fmeta">
+              <b id="fName">—</b>
+              <span id="fMeta">—</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3><span class="num">2</span>API Key</h3>
+          <div class="field">
+            <svg viewBox="0 0 24 24"><circle cx="8" cy="12" r="4"/><path d="M12 12h9M18 12v3M15 12v2"/></svg>
+            <input id="apiKey" type="password" placeholder="sk-..." spellcheck="false" autocomplete="off" />
+            <span class="eye" id="eye">显示</span>
+          </div>
+          <div class="fieldrow">
+            <button class="btn" id="btnTest">测试连接</button>
+            <button class="btn" id="btnSaveKey">保存到本机</button>
+          </div>
+          <div class="selrow"><span>裁决模型</span><span class="v" id="modelName">qwen-plus</span></div>
+        </div>
+
+        <div class="card">
+          <h3><span class="num">3</span>导出地址</h3>
+          <div class="path" id="exportPath">—</div>
+          <div class="fieldrow">
+            <button class="btn" id="btnEdit" title="选择成片的导出文件夹">更改</button>
+            <button class="btn" id="btnReveal" title="只打开导出目录，不播放成片">打开文件夹</button>
+          </div>
+          <div class="pathwarn" id="pathWarn" hidden></div>
+          <div class="vers" id="verList" hidden></div>
+          <div class="stats">
+            <div class="stat"><i>成片时长</i><b id="statDur">—</b></div>
+            <div class="stat"><i>片段数</i><b id="statSegs">—</b></div>
+          </div>
+        </div>
+
+        <div class="card logsCard" id="logCard">
+          <h3 class="loghead" id="logHead" title="点击展开完整日志">
+            <span>处理日志</span>
+            <button class="mini" id="btnRetry" hidden>重试</button>
+            <button class="mini chev" id="btnLogToggle" aria-expanded="false">展开</button>
+          </h3>
+          <div class="logs" id="logs"><div><em>·</em><span>等待上传素材</span></div></div>
+        </div>
+      </section>
+
+      <!-- ═══ 中栏 ═══ -->
+      <section class="col">
+        <div class="pv">
+          <div class="pvtop">
+            <span class="t">预览</span>
+            <span class="badge" id="pvBadge">原片</span>
+            <div class="r">
+              <select class="versel" id="verSel" hidden title="切换成片版本对比"></select>
+              <button class="tab on" data-src="proxy">原片</button>
+              <button class="tab" data-src="out">成片</button>
+            </div>
+          </div>
+          <div class="stage" id="stage">
+            <video id="video" playsinline preload="metadata"></video>
+            <div class="empty" id="pvEmpty">
+              <svg viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M10 9l5 3-5 3z"/></svg>
+              上传素材后可预览
+            </div>
+            <div class="pvnote" id="pvNote" hidden></div>
+          </div>
+          <div class="ctl">
+            <div class="play" id="btnPlay"><i></i></div>
+            <div class="tc" id="tcNow">00:00<em>.0</em></div>
+            <div class="scrub" id="scrub"><div class="fill" id="scrubFill"></div><b id="scrubDot"></b></div>
+            <div class="tc" id="tcAll"><em>/</em> 00:00<em>.0</em></div>
+            <div class="spd">
+              <button class="btn" id="btnRate" title="播放倍速（点击切换，右键复位 1×）">1×</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="tlcard">
+          <div class="tlhead">
+            <span class="t">审核时间轴</span>
+            <div class="legend"><i class="l1">保留</i><i class="l2">已剪</i><i class="l3">待确认</i></div>
+          </div>
+          <div class="ruler" id="ruler"></div>
+          <div class="track" id="track">
+            <div class="wave" id="wave"></div>
+            <div class="gaps" id="gaps"></div>
+            <div class="playhead" id="playhead" style="left:0"></div>
+          </div>
+          <div class="pins" id="pins"></div>
+        </div>
+      </section>
+
+      <!-- ═══ 右栏 ═══ -->
+      <section class="col">
+        <div class="rv">
+          <div class="rvhead">
+            <div class="row1">
+              <b>待确认</b><span class="tag2" id="rvCount">0 处</span>
+              <span class="cnt" id="rvProg">已确认 0 · 剩余 0</span>
+            </div>
+            <div class="desc" id="rvDesc">算法拿不准的地方，逐条问你；没确认的默认按“保留”处理。</div>
+            <div class="prog"><i class="ok" id="progOk"></i><i class="no" id="progNo"></i></div>
+          </div>
+          <div class="rlist" id="rlist">
+            <div class="emptyv">
+              <svg viewBox="0 0 24 24"><path d="M12 3v12m0 0l-3-3m3 3l3-3M4 19h16"/></svg>
+              还没有待确认项<br/>先上传素材并开始剪辑
+            </div>
+          </div>
+          <div class="rvhint" id="rvHint" hidden></div>
+          <div class="rvfoot">
+            <button class="btn" id="btnAcceptAll">全部按建议</button>
+            <button class="btn pri" id="btnApply">应用并重剪</button>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <footer class="status">
+      <b>阶段</b><span id="stStage">待机</span>
+      <b>耗时</b><span id="stElapsed">—</span>
+      <b>队列</b><span id="stQueue">—</span>
+      <div class="r">
+        <span><span class="kbd">D</span> 删 <span class="kbd">K</span> 留 <span class="kbd">空格</span> 重播</span>
+        <span class="ok" id="stReady">● 就绪</span>
+      </div>
+    </footer>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<!-- 「AI 剪辑」重跑：对原片再跑一轮，当前版本保留 -->
+<div class="modal" id="aiModal" hidden>
+  <div class="mbox">
+    <div class="mhead">
+      <b>AI 剪辑</b>
+      <button class="mx" id="aiClose" title="关闭">×</button>
+    </div>
+    <p class="mdesc">对当前结果不满意？在下面写改法。</p>
+    <textarea id="aiNote" maxlength="500" spellcheck="false"
+      placeholder="可选。两种写法最有效：
+① 点名删哪句 —— 用引号抄原话，例如：删掉「有人能够在1个小时之内记住几百个」
+② 调整节奏 —— 例如：再紧凑一点 / 别剪太碎"></textarea>
+    <label class="mchk"><input type="checkbox" id="aiKeep" checked /> 保留我已确认的决定（按时间区间重放）</label>
+    <div class="mfoot">
+      <span class="mhint" id="aiHint"></span>
+      <div class="grow"></div>
+      <button class="btn" id="aiCancel">取消</button>
+      <button class="btn pri" id="aiGo">开始重跑</button>
+    </div>
+  </div>
+</div>
+
+<script src="/app.js"></script>
+</body>
+</html>

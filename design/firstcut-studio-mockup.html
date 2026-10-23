@@ -1,0 +1,529 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>AI 驯剪 · 剪辑台 — 设计稿 v1</title>
+<style>
+  :root{
+    --bg:#08090C; --board:#0C0E13; --panel:#11141B; --panel2:#161A23; --panel3:#1C212C;
+    --line:rgba(255,255,255,.075); --line2:rgba(255,255,255,.12);
+    --text:#E9EDF5; --dim:#8B94A8; --dim2:#5B6478;
+    --accent:#6E8BFF; --amber:#F2A93B; --green:#45D48A; --red:#FF6B6B;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{background:var(--bg);color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+    -webkit-font-smoothing:antialiased}
+  body{padding:26px;display:flex;justify-content:center}
+  .board{width:1440px;height:944px;background:var(--board);border:1px solid var(--line);
+    border-radius:16px;overflow:hidden;display:grid;grid-template-columns:64px 1fr;
+    box-shadow:0 40px 120px rgba(0,0,0,.6)}
+  /* ── 左导航 ── */
+  .rail{border-right:1px solid var(--line);display:flex;flex-direction:column;align-items:center;
+    padding:16px 0;gap:6px;background:#0A0C10}
+  .logo{width:32px;height:32px;border-radius:9px;display:grid;place-items:center;margin-bottom:14px;
+    background:linear-gradient(135deg,#6E8BFF,#A46BFF);box-shadow:0 6px 18px rgba(110,139,255,.35)}
+  .logo svg{width:17px;height:17px}
+  .nav{width:40px;height:40px;border-radius:11px;display:grid;place-items:center;color:var(--dim2)}
+  .nav.on{background:rgba(110,139,255,.14);color:#A9BBFF}
+  .nav svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.6;
+    stroke-linecap:round;stroke-linejoin:round}
+  .rail .sp{flex:1}
+  .avatar{width:30px;height:30px;border-radius:50%;background:linear-gradient(135deg,#2A3346,#3C465C);
+    border:1px solid var(--line2);display:grid;place-items:center;font-size:11px;color:#9FA9BD}
+
+  .main{display:grid;grid-template-rows:58px 1fr 34px;min-width:0}
+  /* ── 顶栏 ── */
+  .topbar{display:flex;align-items:center;gap:16px;padding:0 18px;border-bottom:1px solid var(--line)}
+  .ttl{font-size:13.5px;font-weight:600;letter-spacing:.2px}
+  .ttl span{color:var(--dim2);font-weight:400;margin-left:8px;font-size:12px}
+  .steps{display:flex;align-items:center;gap:2px;margin-left:14px}
+  .step{display:flex;align-items:center;gap:6px;padding:5px 9px;border-radius:7px;font-size:11.5px;color:var(--dim2)}
+  .step .dot{width:6px;height:6px;border-radius:50%;background:#2C3444}
+  .step.done{color:var(--dim)} .step.done .dot{background:var(--green)}
+  .step.cur{background:rgba(242,169,59,.13);color:#FFC978} .step.cur .dot{background:var(--amber);
+    box-shadow:0 0 0 3px rgba(242,169,59,.18)}
+  .step i{font-style:normal;color:#2A3140;margin:0 2px}
+  .grow{flex:1}
+  .pill{display:flex;align-items:center;gap:7px;height:28px;padding:0 11px;border-radius:8px;
+    border:1px solid var(--line);background:var(--panel);font-size:11.5px;color:var(--dim)}
+  .pill b{color:var(--text);font-weight:500}
+  .live{width:6px;height:6px;border-radius:50%;background:var(--green);box-shadow:0 0 0 3px rgba(69,212,138,.15)}
+  .btn{height:30px;padding:0 13px;border-radius:8px;border:1px solid var(--line2);background:var(--panel2);
+    color:var(--text);font-size:12px;display:inline-flex;align-items:center;gap:6px;
+    font-family:inherit;cursor:default}
+  .btn svg{width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:1.7}
+  .btn.pri{background:linear-gradient(180deg,#7590FF,#5C79EE);border-color:#8AA0FF;color:#fff;
+    box-shadow:0 4px 14px rgba(92,121,238,.35)}
+
+  /* ── 主体三栏 ── */
+  .body{display:grid;grid-template-columns:316px minmax(0,1fr) 404px;gap:14px;padding:14px;min-height:0}
+  .col{display:flex;flex-direction:column;gap:12px;min-width:0}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px}
+  .card h3{font-size:11px;color:var(--dim2);font-weight:600;letter-spacing:.9px;text-transform:uppercase;
+    display:flex;align-items:center;gap:7px;margin-bottom:11px}
+  .card h3 em{font-style:normal;color:#4B5468;font-size:10px;letter-spacing:0}
+  .num{width:15px;height:15px;border-radius:5px;background:var(--panel3);color:var(--dim);
+    display:grid;place-items:center;font-size:9.5px;font-weight:700}
+
+  /* ① 上传 */
+  .drop{border:1px dashed rgba(255,255,255,.14);border-radius:10px;background:rgba(255,255,255,.014);
+    padding:14px 12px;text-align:center}
+  .drop .up{width:30px;height:30px;margin:0 auto 8px;border-radius:9px;background:var(--panel3);
+    display:grid;place-items:center;color:#9FA9BD}
+  .drop .up svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round}
+  .drop p{font-size:11.5px;color:var(--dim)}
+  .drop p b{color:#C9D3E6;font-weight:500}
+  .drop small{display:block;margin-top:4px;font-size:10.5px;color:var(--dim2)}
+  .file{margin-top:11px;display:flex;gap:10px;align-items:center;padding:9px;border-radius:9px;
+    background:var(--panel2);border:1px solid var(--line)}
+  .thumb{width:38px;height:52px;border-radius:6px;flex:none;position:relative;overflow:hidden;
+    background:linear-gradient(160deg,#20293A,#141A24)}
+  .thumb:after{content:"";position:absolute;inset:0;
+    background:radial-gradient(circle at 50% 34%,rgba(242,169,59,.35),transparent 62%)}
+  .thumb i{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:0;height:0;
+    border-left:8px solid rgba(255,255,255,.75);border-top:5px solid transparent;border-bottom:5px solid transparent}
+  .fmeta{min-width:0}
+  .fmeta b{display:block;font-size:11.5px;font-weight:500;color:#DCE4F2;white-space:nowrap;
+    overflow:hidden;text-overflow:ellipsis;max-width:186px}
+  .fmeta span{display:block;font-size:10.5px;color:var(--dim2);margin-top:3px}
+  .tag{display:inline-flex;align-items:center;height:17px;padding:0 6px;border-radius:4px;
+    font-size:9.5px;background:rgba(69,212,138,.12);color:#6FE0AB;margin-right:4px}
+
+  /* ② API Key */
+  .field{display:flex;align-items:center;height:34px;border-radius:8px;border:1px solid var(--line2);
+    background:#0D1016;padding:0 10px;gap:8px}
+  .field svg{width:13px;height:13px;stroke:#5B6478;fill:none;stroke-width:1.5}
+  .field .k{font-size:11.5px;color:#C6D0E2;letter-spacing:1.1px;font-family:ui-monospace,Menlo,monospace}
+  .field .eye{margin-left:auto;color:var(--dim2);font-size:10.5px}
+  .fieldrow{display:flex;gap:7px;margin-top:8px}
+  .fieldrow .btn{flex:1;justify-content:center;height:29px;font-size:11.5px}
+  .hint{display:flex;gap:6px;margin-top:9px;font-size:10.5px;color:var(--dim2);line-height:1.5}
+  .hint svg{width:11px;height:11px;flex:none;margin-top:2px;stroke:var(--dim2);fill:none;stroke-width:1.7}
+  .selrow{display:flex;align-items:center;justify-content:space-between;margin-top:10px;
+    padding-top:10px;border-top:1px solid var(--line);font-size:11.5px;color:var(--dim)}
+  .selrow .v{display:flex;align-items:center;gap:5px;color:#C6D0E2}
+  .selrow .v:after{content:"";width:0;height:0;border-left:4px solid transparent;
+    border-right:4px solid transparent;border-top:4px solid #5B6478}
+
+  /* ③ 导出 */
+  .path{display:flex;align-items:center;gap:8px;padding:9px 10px;border-radius:8px;background:#0D1016;
+    border:1px solid var(--line);font-family:ui-monospace,Menlo,monospace;font-size:10.5px;color:#98C0FF;
+    word-break:break-all;line-height:1.45}
+  .stats{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:11px}
+  .stat{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:7px 9px}
+  .stat i{display:block;font-style:normal;font-size:9.5px;color:var(--dim2);margin-bottom:3px}
+  .stat b{font-size:13px;font-weight:600;letter-spacing:-.2px}
+  .stat b small{font-size:9.5px;color:var(--dim2);font-weight:400;margin-left:2px}
+  .logs{display:flex;flex-direction:column;gap:7px}
+  .logs div{display:flex;align-items:center;gap:7px;font-size:10.5px;color:var(--dim)}
+  .logs i{font-style:normal;font-size:7px;flex:none}
+  .logs i.ok{color:var(--green)} .logs i.warn{color:var(--amber)}
+  .logs span{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .logs b{color:var(--dim2);font-weight:400;font-family:ui-monospace,Menlo,monospace;font-size:9.5px}
+
+  /* ── 中栏：预览 ── */
+  .pv{flex:1;min-height:0;display:flex;flex-direction:column;background:var(--panel);
+    border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  .pvtop{height:38px;display:flex;align-items:center;gap:8px;padding:0 12px;border-bottom:1px solid var(--line)}
+  .pvtop .t{font-size:11.5px;color:#C6D0E2}
+  .pvtop .badge{font-size:9.5px;padding:2px 6px;border-radius:4px;background:rgba(110,139,255,.14);color:#9DB0FF}
+  .pvtop .r{margin-left:auto;display:flex;gap:4px}
+  .ico{width:24px;height:24px;border-radius:6px;display:grid;place-items:center;color:var(--dim2)}
+  .ico svg{width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round}
+  .stage{flex:1;min-height:0;display:grid;place-items:center;background:
+    radial-gradient(circle at 50% 45%,#131823,#0B0E14 70%);position:relative}
+  .screen{width:236px;height:420px;border-radius:8px;overflow:hidden;position:relative;
+    background:linear-gradient(170deg,#1A2230,#0E131B);border:1px solid rgba(255,255,255,.09);
+    box-shadow:0 18px 50px rgba(0,0,0,.55)}
+  .screen:before{content:"";position:absolute;inset:0;
+    background:radial-gradient(ellipse at 50% 28%,rgba(242,169,59,.22),transparent 58%)}
+  .screen .person{position:absolute;left:50%;bottom:0;transform:translateX(-50%);width:168px;height:130px;
+    border-radius:84px 84px 0 0;background:linear-gradient(180deg,rgba(126,146,188,.26),rgba(58,70,94,.05))}
+  .screen .head{position:absolute;left:50%;bottom:112px;transform:translateX(-50%);width:70px;height:84px;
+    border-radius:50% 50% 45% 45%;background:linear-gradient(180deg,rgba(150,170,210,.3),rgba(90,104,134,.16))}
+  .screen .cap{position:absolute;left:10px;right:10px;bottom:34px;text-align:center;font-size:11px;
+    line-height:1.55;color:#fff;text-shadow:0 2px 8px rgba(0,0,0,.9);font-weight:600}
+  .screen .cap span{background:rgba(0,0,0,.55);padding:1px 4px;border-radius:3px;box-decoration-break:clone}
+  .screen .badgeL{position:absolute;left:8px;top:8px;font-size:9px;padding:2px 5px;border-radius:4px;
+    background:rgba(0,0,0,.5);color:#B9C4D8}
+  .ctl{height:42px;display:flex;align-items:center;gap:10px;padding:0 12px;border-top:1px solid var(--line);
+    background:#0E1118}
+  .play{width:26px;height:26px;border-radius:50%;background:var(--text);display:grid;place-items:center;flex:none}
+  .play i{width:0;height:0;border-left:7px solid #0B0E14;border-top:4.5px solid transparent;
+    border-bottom:4.5px solid transparent;margin-left:2px}
+  .tc{font-family:ui-monospace,Menlo,monospace;font-size:11px;color:#C6D0E2}
+  .tc em{font-style:normal;color:var(--dim2)}
+  .scrub{flex:1;height:3px;border-radius:2px;background:#2A3140;position:relative}
+  .scrub:after{content:"";position:absolute;left:0;top:0;height:3px;width:38%;border-radius:2px;
+    background:linear-gradient(90deg,#6E8BFF,#A46BFF)}
+  .scrub b{position:absolute;left:38%;top:50%;width:9px;height:9px;border-radius:50%;background:#fff;
+    transform:translate(-50%,-50%);box-shadow:0 0 0 3px rgba(110,139,255,.28)}
+  .ctx{margin-left:auto;display:flex;gap:5px}
+
+  /* ── 时间轴 ── */
+  .tlcard{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px 14px}
+  .tlhead{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+  .tlhead .t{font-size:11.5px;color:#C6D0E2;font-weight:500}
+  .tlhead .sub{font-size:10px;color:var(--dim2)}
+  .legend{margin-left:auto;display:flex;gap:10px;font-size:9.5px;color:var(--dim2)}
+  .legend i{display:inline-flex;align-items:center;gap:4px;font-style:normal}
+  .legend i:before{content:"";width:7px;height:7px;border-radius:2px;background:currentColor}
+  .legend .l1{color:#3E7A5C}.legend .l2{color:#7A4040}.legend .l3{color:var(--amber)}
+  .ruler{display:flex;justify-content:space-between;font-size:9px;color:#4B5468;
+    font-family:ui-monospace,Menlo,monospace;padding:0 1px 5px}
+  .track{position:relative;height:44px;border-radius:7px;overflow:hidden;background:#0D1016;
+    border:1px solid var(--line)}
+  .wave{position:absolute;inset:0;display:flex;align-items:center;gap:2px;padding:0 1px;opacity:.55}
+  .wave b{flex:1;background:#3C6E8E;border-radius:1px}
+  .gapblk{position:absolute;top:0;bottom:0;background:repeating-linear-gradient(135deg,
+    rgba(255,107,107,.26) 0 4px,rgba(255,107,107,.1) 4px 8px);
+    border-left:1px solid rgba(255,107,107,.65);border-right:1px solid rgba(255,107,107,.65)}
+  .pins{position:relative;height:26px;margin-top:5px}
+  .pin{position:absolute;top:0;transform:translateX(-50%);display:flex;flex-direction:column;
+    align-items:center;cursor:default}
+  .pin .st{width:1px;height:8px;background:rgba(242,169,59,.5)}
+  .pin .lb{width:15px;height:15px;border-radius:50%;background:#2A2011;border:1.4px solid var(--amber);
+    color:#FFC978;font-size:8.5px;display:grid;place-items:center;font-weight:700}
+  .pin.on .lb{background:var(--amber);color:#1A1206;box-shadow:0 0 0 4px rgba(242,169,59,.18)}
+  .pin.done .lb{background:#12251C;border-color:var(--green);color:#6FE0AB;box-shadow:none}
+  .pin.no .lb{background:#251414;border-color:var(--red);color:#FF9C9C;box-shadow:none}
+  .playhead{position:absolute;top:0;bottom:0;width:1.5px;background:#fff;z-index:3;
+    box-shadow:0 0 8px rgba(255,255,255,.5)}
+  .playhead:before{content:"";position:absolute;top:-3px;left:50%;transform:translateX(-50%);
+    border-left:4px solid transparent;border-right:4px solid transparent;border-top:5px solid #fff}
+
+  /* ── 右栏：互动区 ── */
+  .rv{flex:1;min-height:0;display:flex;flex-direction:column;background:var(--panel);
+    border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  .rvhead{padding:13px 14px 11px;border-bottom:1px solid var(--line)}
+  .rvhead .row1{display:flex;align-items:center;gap:8px}
+  .rvhead .row1 b{font-size:12.5px;font-weight:600}
+  .rvhead .cnt{margin-left:auto;font-size:10px;color:var(--dim2);font-family:ui-monospace,Menlo,monospace}
+  .rvhead .desc{font-size:10.5px;color:var(--dim2);margin-top:5px;line-height:1.5}
+  .prog{height:3px;border-radius:2px;background:#222833;margin-top:10px;overflow:hidden;display:flex;gap:1.5px}
+  .prog i{height:3px;border-radius:2px}
+  .prog .ok{background:var(--green);width:22%}
+  .prog .no{background:var(--red);width:14%}
+  .rlist{flex:1;overflow:hidden;padding:10px 12px;display:flex;flex-direction:column;gap:9px}
+  .q{border-radius:10px;border:1px solid var(--line);background:var(--panel2);padding:11px 11px 10px;
+    position:relative}
+  .q.on{border-color:rgba(242,169,59,.5);background:linear-gradient(180deg,rgba(242,169,59,.07),rgba(242,169,59,.02));
+    box-shadow:0 0 0 1px rgba(242,169,59,.12),0 8px 22px rgba(0,0,0,.3)}
+  .q.done{opacity:.62}
+  .qh{display:flex;align-items:center;gap:6px;margin-bottom:7px}
+  .tag2{font-size:9px;padding:2px 6px;border-radius:4px;background:rgba(242,169,59,.14);color:#FFC978;
+    white-space:nowrap}
+  .tag2.b{background:rgba(110,139,255,.14);color:#A9BBFF}
+  .tag2.g{background:rgba(69,212,138,.12);color:#6FE0AB}
+  .tag2.r{background:rgba(255,107,107,.12);color:#FF9C9C}
+  .qh .id{font-size:9.5px;color:var(--dim2);font-family:ui-monospace,Menlo,monospace}
+  .qh .tt{margin-left:auto;font-size:9.5px;color:#4B5468;font-family:ui-monospace,Menlo,monospace}
+  .qt{font-size:11.5px;line-height:1.65;color:#D4DCEC;margin-bottom:7px}
+  .qt .hl{background:rgba(242,169,59,.2);color:#FFD79A;border-radius:3px;padding:0 2px;
+    box-shadow:inset 0 -1px 0 rgba(242,169,59,.6)}
+  .qt .hl.r{background:rgba(255,107,107,.18);color:#FFB4B4;box-shadow:inset 0 -1px 0 rgba(255,107,107,.55)}
+  .why{font-size:10px;line-height:1.55;color:var(--dim);background:rgba(0,0,0,.28);
+    border-left:2px solid #2E3646;border-radius:0 5px 5px 0;padding:6px 8px;margin-bottom:9px}
+  .why b{color:#B9C4DA;font-weight:500}
+  .why em{font-style:normal;color:#FFC978}
+  .acts{display:flex;gap:6px}
+  .a{height:26px;padding:0 10px;border-radius:6px;border:1px solid var(--line2);background:#1A1F29;
+    color:#C6D0E2;font-size:10.5px;display:inline-flex;align-items:center;gap:5px;font-family:inherit}
+  .a.del{background:rgba(255,107,107,.13);border-color:rgba(255,107,107,.4);color:#FFA8A8}
+  .a.keep{background:rgba(69,212,138,.11);border-color:rgba(69,212,138,.35);color:#7FE3B4}
+  .a.ghost{background:transparent}
+  .a.k{margin-left:auto;font-family:ui-monospace,Menlo,monospace;font-size:9px;color:var(--dim2);
+    border-color:transparent;background:transparent;padding:0 2px}
+  .more{font-size:10px;color:var(--dim2);text-align:center;padding:6px 0 2px}
+  .rvfoot{border-top:1px solid var(--line);padding:10px 12px;display:flex;gap:7px;align-items:center;
+    background:#0E1118}
+  .rvfoot .btn{flex:1;justify-content:center}
+  .kbd{font-family:ui-monospace,Menlo,monospace;font-size:9px;color:var(--dim2);
+    border:1px solid var(--line2);border-radius:4px;padding:1px 4px;margin:0 1px}
+
+  /* ── 状态栏 ── */
+  .status{display:flex;align-items:center;gap:14px;padding:0 16px;border-top:1px solid var(--line);
+    font-size:10px;color:var(--dim2);font-family:ui-monospace,Menlo,monospace;background:#0A0C10}
+  .status b{color:var(--dim);font-weight:400}
+  .status .ok{color:#6FE0AB}
+  .status .r{margin-left:auto;display:flex;gap:14px}
+</style>
+</head>
+<body>
+<div class="board">
+
+  <!-- 左导航 -->
+  <aside class="rail">
+    <div class="logo">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round">
+        <path d="M4 6h16M4 12h10M4 18h6"/><circle cx="18" cy="16" r="3"/>
+      </svg>
+    </div>
+    <div class="nav on"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M9 20V9"/></svg></div>
+    <div class="nav"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg></div>
+    <div class="nav"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg></div>
+    <div class="nav"><svg viewBox="0 0 24 24"><path d="M12 3v12m0 0l-3-3m3 3l3-3M4 19h16"/></svg></div>
+    <div class="sp"></div>
+    <div class="avatar">J</div>
+  </aside>
+
+  <div class="main">
+    <!-- 顶栏 -->
+    <header class="topbar">
+      <div class="ttl">剪辑台 <span>20261009_C0779.MP4</span></div>
+      <div class="steps">
+        <div class="step done"><i class="dot"></i>上传</div><i>›</i>
+        <div class="step done"><i class="dot"></i>转写</div><i>›</i>
+        <div class="step done"><i class="dot"></i>裁决</div><i>›</i>
+        <div class="step cur"><i class="dot"></i>审核 2/5</div><i>›</i>
+        <div class="step"><i class="dot"></i>导出</div>
+      </div>
+      <div class="grow"></div>
+      <div class="pill"><i class="live"></i>API <b>已连接</b></div>
+      <button class="btn"><svg viewBox="0 0 24 24"><path d="M12 3v12m0 0l-3-3m3 3l3-3M4 19h16"/></svg>导出成片</button>
+      <button class="btn pri"><svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg>按当前决定重剪</button>
+    </header>
+
+    <div class="body">
+
+      <!-- ═══ 左栏：三件必备功能 ═══ -->
+      <section class="col">
+
+        <!-- ① 上传 -->
+        <div class="card">
+          <h3><span class="num">1</span>上传视频 <em>素材入口</em></h3>
+          <div class="drop">
+            <div class="up"><svg viewBox="0 0 24 24"><path d="M12 16V4m0 0L7 9m5-5l5 5M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"/></svg></div>
+            <p>拖入视频，或 <b>点击选择</b></p>
+            <small>MP4 / MOV / MKV · 支持竖屏自动识别</small>
+          </div>
+          <div class="file">
+            <div class="thumb"><i></i></div>
+            <div class="fmeta">
+              <b>20261009_C0779.MP4</b>
+              <span><i class="tag">竖屏 1080×1920</i>121.6s · 98.4 MB</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- ② API Key -->
+        <div class="card">
+          <h3><span class="num">2</span>API Key <em>转写 + 裁决共用</em></h3>
+          <div class="field">
+            <svg viewBox="0 0 24 24" stroke="#5B6478" fill="none" stroke-width="1.6"><circle cx="8" cy="12" r="4"/><path d="M12 12h9M18 12v3M15 12v2"/></svg>
+            <span class="k">sk-ws-••••••••••••••••••••7f3a</span>
+            <span class="eye">显示</span>
+          </div>
+          <div class="fieldrow">
+            <button class="btn">测试连接</button>
+            <button class="btn">保存到本机</button>
+          </div>
+          <div class="hint">
+            <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></svg>
+            <span>只写入本机 <code>.env</code>，不上传、不入库；同一把 Key 供 paraformer 转写与 qwen 裁决使用。</span>
+          </div>
+          <div class="selrow"><span>裁决模型</span><span class="v">qwen-plus</span></div>
+        </div>
+
+        <!-- ③ 导出地址 -->
+        <div class="card">
+          <h3><span class="num">3</span>导出地址 <em>成片落点</em></h3>
+          <div class="path">D:\out\20261009_C0779\<br/>cloud-v11-c0779.mp4</div>
+          <div class="fieldrow">
+            <button class="btn"><svg viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 012-2h8"/></svg>复制路径</button>
+            <button class="btn"><svg viewBox="0 0 24 24"><path d="M3 7h6l2 2h10v10H3z"/></svg>打开文件夹</button>
+          </div>
+          <div class="stats">
+            <div class="stat"><i>成片时长</i><b>93.5<small>s</small></b></div>
+            <div class="stat"><i>片段数</i><b>16<small>段</small></b></div>
+          </div>
+        </div>
+
+        <!-- 处理日志 -->
+        <div class="card">
+          <h3>处理日志 <em>本次运行</em></h3>
+          <div class="logs">
+            <div><i class="ok">●</i><span>转写 paraformer-v2 · 16 段</span><b>1m48s</b></div>
+            <div><i class="ok">●</i><span>语义裁决 qwen-plus · 16 句</span><b>0m52s</b></div>
+            <div><i class="ok">●</i><span>确定性护栏 · 拦下 5 项</span><b>0m02s</b></div>
+            <div><i class="warn">●</i><span>待你确认 3 项</span><b>等待</b></div>
+          </div>
+        </div>
+
+      </section>
+
+      <!-- ═══ 中栏：预览 + 时间轴 ═══ -->
+      <section class="col" style="gap:12px">
+        <div class="pv">
+          <div class="pvtop">
+            <span class="t">成片预览</span>
+            <span class="badge">9:16</span>
+            <div class="r">
+              <div class="ico"><svg viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 00-2 2v3M16 3h3a2 2 0 012 2v3M8 21H5a2 2 0 01-2-2v-3M16 21h3a2 2 0 002-2v-3"/></svg></div>
+              <div class="ico"><svg viewBox="0 0 24 24"><path d="M11 5L6 9H3v6h3l5 4zM16 9a4 4 0 010 6"/></svg></div>
+            </div>
+          </div>
+          <div class="stage">
+            <div class="screen">
+              <div class="person"></div>
+              <div class="head"></div>
+              <span class="badgeL">01:07 / 01:33</span>
+              <div class="cap"><span>那孩子大脑记忆</span><br/><span>这个开关也会默默的关上</span></div>
+            </div>
+          </div>
+          <div class="ctl">
+            <div class="play"><i></i></div>
+            <div class="tc">00:32<em>.4</em></div>
+            <div class="scrub"><b></b></div>
+            <div class="tc"><em>/</em> 01:33<em>.5</em></div>
+            <div class="ctx">
+              <button class="btn" style="height:24px;padding:0 8px;font-size:10.5px">−1.5s</button>
+              <button class="btn" style="height:24px;padding:0 8px;font-size:10.5px">+1.5s</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 时间轴 -->
+        <div class="tlcard">
+          <div class="tlhead">
+            <span class="t">审核时间轴</span>
+            <span class="sub">按原片时间 · 点标记跳到该处</span>
+            <div class="legend">
+              <i class="l1">保留</i><i class="l2">已剪</i><i class="l3">待确认</i>
+            </div>
+          </div>
+          <div class="ruler"><span>00:00</span><span>00:20</span><span>00:40</span><span>01:00</span><span>01:20</span><span>01:40</span><span>02:00</span></div>
+          <div class="track">
+            <div class="wave" id="wave"></div>
+            <div class="gapblk" style="left:4.2%;width:3.6%"></div>
+            <div class="gapblk" style="left:15.8%;width:2.2%"></div>
+            <div class="gapblk" style="left:28.4%;width:5.1%"></div>
+            <div class="gapblk" style="left:46.9%;width:2.8%"></div>
+            <div class="gapblk" style="left:55.6%;width:3.4%"></div>
+            <div class="gapblk" style="left:70.2%;width:2.1%"></div>
+            <div class="gapblk" style="left:84.5%;width:4.3%"></div>
+            <div class="playhead" style="left:55.6%"></div>
+          </div>
+          <div class="pins">
+            <div class="pin done" style="left:16.9%"><span class="st"></span><span class="lb">1</span></div>
+            <div class="pin done" style="left:30.9%"><span class="st"></span><span class="lb">2</span></div>
+            <div class="pin on" style="left:55.6%"><span class="st"></span><span class="lb">3</span></div>
+            <div class="pin" style="left:61.2%"><span class="st"></span><span class="lb">4</span></div>
+            <div class="pin" style="left:78.4%"><span class="st"></span><span class="lb">5</span></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══ 右栏：互动审核区 ═══ -->
+      <section class="col">
+        <div class="rv">
+          <div class="rvhead">
+            <div class="row1">
+              <b>待确认</b>
+              <span class="tag2" style="margin-left:0">5 处</span>
+              <span class="cnt">已确认 2 · 剩余 3</span>
+            </div>
+            <div class="desc">算法拿不准的地方，逐条问你。同一条素材只问这几处，不影响其他已确定的剪切。</div>
+            <div class="prog"><i class="ok"></i><i class="no"></i></div>
+          </div>
+
+          <div class="rlist">
+
+            <!-- 已完成 1 -->
+            <article class="q done">
+              <div class="qh"><span class="tag2 g">已保留</span><span class="id">#1</span>
+                <span class="tt">00:20.5 · 1.4s</span></div>
+              <div class="qt">…题目也钻得进去<span class="hl">相反的一个脾气</span>。</div>
+              <div class="why">段尾与下一句开头重合 6 字，已按「回声」剪掉；你选了保留 → <b>已恢复</b></div>
+            </article>
+
+            <!-- 已完成 2 -->
+            <article class="q done">
+              <div class="qh"><span class="tag2 r">已删除</span><span class="id">#2</span>
+                <span class="tt">00:37.6 · 2.2s</span></div>
+              <div class="qt"><span class="hl r">我在现场带</span>｜我在直播间现场带你来感受一下…</div>
+              <div class="why">插词式假起头：前 5 字后停顿 1.23s，重来版多插了「直播间」</div>
+            </article>
+
+            <!-- 进行中 3 -->
+            <article class="q on">
+              <div class="qh"><span class="tag2">语气词 · 不确定</span><span class="id">#3</span>
+                <span class="tt">01:07.75 · 0.13s</span></div>
+              <div class="qt">那孩子大脑记忆<span class="hl">这个</span>开关也会默默的给关上</div>
+              <div class="why">
+                <b>模型判「删」</b>（犹豫垫词），<b>护栏判「留」</b>（两侧留白 0.00s，删了是硬拼）。
+                <em>→ 两种判断都成立，交给你。</em>
+              </div>
+              <div class="acts">
+                <button class="a del">删掉</button>
+                <button class="a keep">保留</button>
+                <button class="a ghost">听上下文</button>
+                <button class="a k">D / K</button>
+              </div>
+            </article>
+
+            <!-- 待问 4 -->
+            <article class="q">
+              <div class="qh"><span class="tag2 b">超长重说</span><span class="id">#4</span>
+                <span class="tt">01:14.4 · 9.7s</span></div>
+              <div class="qt">你可能会觉得我在说反话，孩子成绩不好，不改孩子，改家长…</div>
+              <div class="why">判为「重说」但 37 字超过阈值，找不到可对齐的重复锚点 → <b>无法自动定位切口</b></div>
+              <div class="acts">
+                <button class="a del">整段删</button>
+                <button class="a keep">保留</button>
+                <button class="a ghost">听这一遍</button>
+              </div>
+            </article>
+
+            <!-- 待问 5 -->
+            <article class="q">
+              <div class="qh"><span class="tag2">跑题 · 中段</span><span class="id">#5</span>
+                <span class="tt">01:35.3 · 2.0s</span></div>
+              <div class="qt"><span class="hl">哦，开始吧</span>，那我们今天讲的第一个是…</div>
+              <div class="why">模型判「跑题」，但位于中段（护栏只允许删片头/片尾）→ <b>可能是录制口令而非废话</b></div>
+              <div class="acts">
+                <button class="a del">删掉</button>
+                <button class="a keep">保留</button>
+                <button class="a ghost">听上下文</button>
+              </div>
+            </article>
+          </div>
+
+          <div class="rvfoot">
+            <button class="btn">全部按建议</button>
+            <button class="btn pri">应用并重剪</button>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- 状态栏 -->
+    <footer class="status">
+      <b>ASR</b><span class="ok">paraformer-v2 · 121.6s → 16 段</span>
+      <b>LLM</b><span>qwen-plus · 11 次调用</span>
+      <b>耗时</b><span>3m12s</span>
+      <b>费用</b><span>¥0.019</span>
+      <div class="r">
+        <span><span class="kbd">D</span> 删 <span class="kbd">K</span> 留 <span class="kbd">空格</span> 重播</span>
+        <span class="ok">● 就绪</span>
+      </div>
+    </footer>
+  </div>
+</div>
+
+<script>
+  // 波形条：确定性伪随机，纯装饰
+  const wave = document.getElementById('wave');
+  let seed = 7;
+  const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+  const n = 118;
+  for (let i = 0; i < n; i++) {
+    const b = document.createElement('b');
+    const env = 0.35 + 0.65 * Math.abs(Math.sin(i / 11));
+    b.style.height = (10 + rnd() * 30 * env).toFixed(1) + 'px';
+    wave.appendChild(b);
+  }
+</script>
+</body>
+</html>
