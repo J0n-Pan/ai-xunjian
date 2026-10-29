@@ -12,9 +12,12 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { applyDecisions } from "./review-clip.mjs";
+import { homeOf } from "./home.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, "..");
+// 工程数据在数据目录，不在程序目录（换版本时程序目录会被整体替换）
+const HOME = homeOf(ROOT);
 const R = JSON.parse(fs.readFileSync(path.join(HERE, "rules.json"), "utf8"));
 const FFMPEG = process.env.XUNJIAN_FFMPEG || "ffmpeg";
 
@@ -28,10 +31,10 @@ if (!NAME) {
   console.error("用法: node firstcut/reexport.mjs --name <episode> [--out <file>]");
   process.exit(2);
 }
-const EP = path.join(ROOT, "episodes", NAME);
+const EP = path.join(HOME, "episodes", NAME);
 const planPath = path.join(EP, "work/cut-plan.json");
 if (!fs.existsSync(planPath)) {
-  console.error(`找不到 ${path.relative(ROOT, planPath)}`);
+  console.error(`找不到 ${path.relative(HOME, planPath)}`);
   process.exit(2);
 }
 const plan = JSON.parse(fs.readFileSync(planPath, "utf8"));

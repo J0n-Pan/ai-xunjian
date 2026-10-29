@@ -13,11 +13,14 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { homeOf } from "./home.mjs";
 
 // 独立可用：被 run.mjs spawn 时已继承好环境变量，但单独调用（调试/脚本）也要能读到 .env。
 (() => {
   const here = path.dirname(fileURLToPath(import.meta.url));
-  for (const p of [path.join(here, "..", ".env"), path.join(process.cwd(), ".env")]) {
+  // 数据目录排最前：免安装包里 .env 跟工程数据放在一起，不在程序目录
+  const cands = [path.join(homeOf(path.join(here, "..")), ".env"), path.join(here, "..", ".env"), path.join(process.cwd(), ".env")];
+  for (const p of cands) {
     if (!fs.existsSync(p)) continue;
     try {
       for (const line of fs.readFileSync(p, "utf8").split(/\r?\n/)) {

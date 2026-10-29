@@ -10,14 +10,17 @@ import path from "node:path";
 import { detectRetakes, detectStutters, detectFillers, findTier2, subtractRanges, retakeSuffixOk } from "./retake.mjs";
 import { clipReviewItems } from "./review-clip.mjs";
 import { resolveNoteDirectives } from "./note-directive.mjs";
+import { homeOf } from "./home.mjs";
 
 const ROOT = process.cwd();
+// 程序目录（ROOT）会被整体替换，工程数据在 HOME；两者在源码仓库里是同一个目录
+const HOME = homeOf(ROOT);
 
 // ── 零依赖 .env 加载（必须在读取任何 process.env 之前执行）──
 // 项目原本没有 dotenv 机制：用户按 README 写了 .env 也不会生效，表现为"配了 key 还说没配"。
 // 规则：已存在的同名环境变量优先（不覆盖用户在 shell 里显式设置的值）。
 (() => {
-  const p = path.join(ROOT, ".env");
+  const p = path.join(HOME, ".env");
   if (!fs.existsSync(p)) return;
   try {
     for (const line of fs.readFileSync(p, "utf8").split(/\r?\n/)) {
@@ -103,7 +106,7 @@ const CUT_ONLY = args.includes("--cut-only");   // 只跑剪辑层，出成片�
 // 「AI 剪辑」重跑：服务端先把旧版冻结成 vN，再传这个号让本次结果登记为第 N 版
 const REBASE_TO = Number(process.env.XUNJIAN_REBASE_TO || 0);
 const RETAKE_SIM_OPT = getOpt("--retake-sim", null);   // 未显式给出时用 rules.retake.sim
-const EP = path.join(ROOT, "episodes", NAME);
+const EP = path.join(HOME, "episodes", NAME);
 const step = (m) => console.log("\n▸ " + m);
 const run = (cmd, a, opts = {}) => spawnSync(cmd, a, { encoding: "utf8", maxBuffer: 64e6, ...opts });
 const die = (m) => { console.error("✗ " + m); process.exit(1); };

@@ -67,6 +67,16 @@ async function loadConfig() {
   $("apiKey").placeholder = c.hasKey ? c.masked : "sk-...";
   $("modelName").textContent = c.model || "qwen-plus";
   paintExportPath();
+  // 换版本后第一次打开：告诉用户工程还在、旧版去哪了（每份接管记录只提示一次）
+  const up = c.upgrade;
+  if (up && up.at && localStorage.getItem("studio.upgradeAt") !== up.at) {
+    localStorage.setItem("studio.upgradeAt", up.at);
+    const n = up.projects || 0;
+    const retired = (up.retired || []).length;
+    setTimeout(() => toast(retired
+      ? `已接管旧版数据：${n} 个工程，旧版已移入回收站`
+      : `已接管旧版数据：${n} 个工程`), 800);
+  }
 }
 
 function paintExportPath() {

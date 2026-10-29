@@ -14,13 +14,16 @@ import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { clipReviewItems, applyDecisions } from "../firstcut/review-clip.mjs";
 import { splitSubs } from "../firstcut/subs-split.mjs";
+import { homeOf } from "../firstcut/home.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, "..");
+// 程序目录（ROOT）可以整体替换，工程数据放 HOME —— 换版本不丢工程，见 firstcut/home.mjs
+const HOME = homeOf(ROOT);
 const STUDIO = path.join(ROOT, "studio");
-const EPISODES = path.join(ROOT, "episodes");
-const UPLOADS = path.join(ROOT, "uploads");
-const ENV_PATH = path.join(ROOT, ".env");
+const EPISODES = path.join(HOME, "episodes");
+const UPLOADS = path.join(HOME, "uploads");
+const ENV_PATH = path.join(HOME, ".env");
 const PORT = Number(process.env.STUDIO_PORT || 5179);
 const PID_FILE = path.join(ROOT, ".studio.pid");
 
@@ -70,12 +73,12 @@ const maskKey = (k) => (!k ? "" : k.length <= 10 ? "••••" : `${k.slice(0
 // .env 里存的是绝对路径，而整个目录被拷到另一台 Windows 机器时它照样生效：
 // 盘符可能不存在（D:\剪辑成片）、也可能是别人的用户目录 → mkdir 失败被静默吞掉，
 // 于是「打开文件夹」点开是空的、「打开成片」404、「更改」在不存在的位置弹窗。
-// 这里统一做一次可用性校验：不可写就回退到 <repo>/exports，并把"用户原本想要的"一起报给前端。
+// 这里统一做一次可用性校验：不可写就回退到数据目录下的 exports，并把"用户原本想要的"一起报给前端。
 function exportDirInfo() {
   const want = String(readEnv().XUNJIAN_EXPORT_DIR || "").trim();
-  const fallback = path.join(ROOT, "exports");
+  const fallback = path.join(HOME, "exports");
   if (!want) { try { fs.mkdirSync(fallback, { recursive: true }); } catch {} return { dir: fallback, want: "", fallback: false }; }
-  const abs = path.isAbsolute(want) ? want : path.join(ROOT, want);
+  const abs = path.isAbsolute(want) ? want : path.join(HOME, want);
   try {
     fs.mkdirSync(abs, { recursive: true });
     fs.accessSync(abs, fs.constants.W_OK);
@@ -86,6 +89,26 @@ function exportDirInfo() {
   }
 }
 const resolveExportDir = () => exportDirInfo().dir;
+
+// 「接管旧版数据」的结果：免安装包首启时由 scripts/upgrade.mjs 写进数据目录，
+// 前端只在这个时间戳变了以后提示一次（localStorage 记已读），不重复打扰。
+function readUpgradeInfo() {
+  const f = path.join(HOME, ".upgrade.json");
+  if (!fs.existsSync(f)) return null;
+  try {
+    const j = JSON.parse(fs.readFileSync(f, "utf8"));
+    if (!j || !j.at) return null;
+    return {
+      at: String(j.at),
+      projects: Number(j.projects || 0),
+      from: Array.isArray(j.from) ? j.from.map(String) : [],
+      retired: Array.isArray(j.retired) ? j.retired.map(String) : [],
+      home: HOME,
+    };
+  } catch {
+    return null;
+  }
+}
 
 // 基线计划 + 决定 = 有效片段表（计划本身永远不改，反复重剪才幂等）
 function readOverrides(name) {
@@ -401,7 +424,7 @@ function pruneVersions(name, keep = 3) {
     const f = resolveVerFile(name, it.file);
     if (!f) continue;
     if (path.relative(ep, f).startsWith("..")) continue;   // 越界的一律不删
-    try { fs.unlinkSync(f); removed.push(path.relative(ROOT, f)); } catch {}
+    try { fs.unlinkSync(f); removed.push(path.relative(HOME, f)); } catch {}
   }
   try {
     fs.writeFileSync(path.join(ep, "work/versions.json"),
@@ -772,6 +795,10 @@ const server = http.createServer(async (req, res) => {
         exportDirFallback: !!ed.fallback,
         exportDirError: ed.error || null,
         asr: env.XUNJIAN_ASR || "paraformer-v2",
+        // 程序目录 / 数据目录：换版本时程序会变，数据不会
+        root: ROOT,
+        home: HOME,
+        upgrade: readUpgradeInfo(),
       });
     }
     if (p === "/api/config" && req.method === "POST") {
@@ -1082,7 +1109,7 @@ const server = http.createServer(async (req, res) => {
       }
       // 早期是直接跑命令行、没经过剪辑台的工程不会留 run.log → 按产物拼一份摘要
       if (!text.trim()) text = digestLog(name);
-      if (text.length > 600 * 1024) text = `……（只保留最后 600KB，完整日志见 ${path.relative(ROOT, lf)}）\n` + text.slice(-600 * 1024);
+      if (text.length > 600 * 1024) text = `……（只保留最后 600KB，完整日志见 ${path.relative(HOME, lf)}）\n` + text.slice(-600 * 1024);
       return json(res, 200, {
         ok: true, name, text, running: !!(j && j.running),
         lines: text ? text.split(/\r?\n/).filter((x) => x.trim()).length : 0,
@@ -1151,7 +1178,7 @@ const server = http.createServer(async (req, res) => {
         // 再兜底：给一段真实的结果摘要，而不是让面板空着
         logs = `原片 ${rawDur ? rawDur.toFixed(1) : "?"}s → 成片 ${outDur.toFixed(1)}s（按当前决定）\n`
           + `待你确认 ${reviewCount ?? 0} 条\n`
-          + `成片 ${cur.file ? path.relative(ROOT, cur.file) : "（尚未生成）"}`;
+          + `成片 ${cur.file ? path.relative(HOME, cur.file) : "（尚未生成）"}`;
       }
       return json(res, 200, {
         ok: true, name, running: j.running, done: j.done, stage: j.stage, pct: j.pct,

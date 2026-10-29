@@ -1,7 +1,7 @@
 {
   "name": "ai-xunjian",
   "private": true,
-  "version": "1.0.1",
+  "version": "1.1.0",
   "type": "module",
   "description": "AI驯剪 — AI 剪的视频，你说了算。复盘、修改、实时预览 AI 剪辑结果的可视化真片编辑器。",
   "scripts": {
