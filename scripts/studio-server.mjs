@@ -34,6 +34,52 @@ const FFPROBE = FFMPEG.replace(/ffmpeg(?=[^/\\]*$)/, "ffprobe");
 fs.mkdirSync(UPLOADS, { recursive: true });
 fs.mkdirSync(EPISODES, { recursive: true });
 
+// ── 老工程的素材路径自愈 ──────────────────────────────────────
+// 1.0.x 把数据放在程序目录里，meta.file / cut-plan.input 记的是**当时的绝对路径**。
+// 被接管搬进数据目录后这些路径全部指向已经被回收的旧程序目录 —— 文件其实还在 uploads 下，
+// 只是换了位置。不修正的话 /api/projects 会认为「素材没了」把整个工程从下拉里藏掉
+// （实测：升级后磁盘上 1 个工程，界面 0 条）。启动时按「工程名 / 文件名」找回一次就够。
+function healEpisodePaths() {
+  let fixed = 0;
+  const findFor = (name, oldPath) => {
+    const base = path.basename(String(oldPath));
+    if (!base) return null;
+    const tries = [path.join(UPLOADS, name, base)];
+    // 早期上传目录不一定叫工程名（用过时间戳），再按文件名在 uploads 下一层兜一遍
+    try {
+      for (const d of fs.readdirSync(UPLOADS, { withFileTypes: true })) {
+        if (d.isDirectory()) tries.push(path.join(UPLOADS, d.name, base));
+      }
+    } catch {}
+    const s = String(oldPath).replace(/\\/g, "/");
+    const i = s.toLowerCase().lastIndexOf("/uploads/");
+    if (i >= 0) tries.push(path.join(UPLOADS, s.slice(i + 9)));
+    return tries.find((p) => { try { return fs.existsSync(p); } catch { return false; } }) || null;
+  };
+  const fixFile = (file, key) => {
+    let doc;
+    try { doc = JSON.parse(fs.readFileSync(file, "utf8")); } catch { return; }
+    const cur = doc && doc[key];
+    if (typeof cur !== "string" || !cur || fs.existsSync(cur)) return;
+    const hit = findFor(path.basename(path.dirname(path.dirname(file))), cur);
+    if (!hit) return;
+    doc[key] = hit;
+    try { fs.writeFileSync(file, JSON.stringify(doc, null, 1)); fixed++; } catch {}
+  };
+  let dirs = [];
+  try {
+    dirs = fs.readdirSync(EPISODES, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name);
+  } catch { return 0; }
+  for (const name of dirs) {
+    const work = path.join(EPISODES, name, "work");
+    fixFile(path.join(work, "meta.json"), "file");
+    fixFile(path.join(work, "cut-plan.json"), "input");
+  }
+  if (fixed) console.log(`  已修正 ${fixed} 处失效的素材路径（老工程被接管后文件换了位置）`);
+  return fixed;
+}
+healEpisodePaths();
+
 // ────────────────────────── 崩溃留痕 ──────────────────────────
 // 以前进程一崩就什么都不剩：stderr 随终端一起没了，只能靠系统事件日志反推（2026-10-29 那次
 // 就是靠「虚拟内存不足 + DWM 0xc00001ad」才定位到 ffmpeg 吃 21GB）。
