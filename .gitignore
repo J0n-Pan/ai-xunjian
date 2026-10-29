@@ -37,3 +37,6 @@ __pycache__/
 *.pem
 .claude/
 settings.local.json
+
+# 运行时产物：服务写下的 PID（隐藏启动后靠它停止）
+.studio.pid

@@ -130,9 +130,17 @@
         <div class="tlcard">
           <div class="tlhead">
             <span class="t">审核时间轴</span>
+            <span class="substat" id="subStat" hidden></span>
             <div class="legend"><i class="l1">保留</i><i class="l2">已剪</i><i class="l3">待确认</i></div>
           </div>
           <div class="ruler" id="ruler"></div>
+          <!-- 字幕条：整片逐句字幕，点选后可标「剪掉」；只累积标记，点「应用并重剪」才落盘 -->
+          <div class="subs" id="subs"></div>
+          <div class="subbar" id="subBar" hidden>
+            <span class="sbi" id="subInfo"></span>
+            <button class="btn" id="subToggle">剪掉这段</button>
+            <button class="btn mute" id="subClose">取消选择</button>
+          </div>
           <div class="track" id="track">
             <div class="wave" id="wave"></div>
             <div class="gaps" id="gaps"></div>

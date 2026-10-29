@@ -13,6 +13,7 @@ import https from "node:https";
 import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { clipReviewItems, applyDecisions } from "../firstcut/review-clip.mjs";
+import { splitSubs } from "../firstcut/subs-split.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, "..");
@@ -21,6 +22,7 @@ const EPISODES = path.join(ROOT, "episodes");
 const UPLOADS = path.join(ROOT, "uploads");
 const ENV_PATH = path.join(ROOT, ".env");
 const PORT = Number(process.env.STUDIO_PORT || 5179);
+const PID_FILE = path.join(ROOT, ".studio.pid");
 
 const NODE = process.execPath;
 const FFMPEG = process.env.XUNJIAN_FFMPEG || "ffmpeg";
@@ -1206,9 +1208,17 @@ const server = http.createServer(async (req, res) => {
       }
       if (plan.rawDur - cur > 0.05) gaps.push([+cur.toFixed(2), +plan.rawDur.toFixed(2)]);
       const cv = currentVersion(name);
+      // 字幕条要的是「原片字幕」，不是保留段 —— 已剪的句子也要显示（灰掉），
+      // 否则用户看不到某句话为什么不见了。raw-segs.json 是 ASR 原始产物，剪任何东西都不动它。
+      // ASR 是句子级的（一段常有 6~12 秒，点一下删太多），再按标点/词边界切成 1~3 秒的小块。
+      let subs = [];
+      try {
+        const rsf = path.join(EPISODES, name, "work/raw-segs.json");
+        if (fs.existsSync(rsf)) subs = splitSubs(JSON.parse(fs.readFileSync(rsf, "utf8")));
+      } catch {}
       return json(res, 200, {
         ok: true, name, rawDur: plan.rawDur, speed: plan.speed || 1,
-        segs: eff, baseSegs: plan.segs, gaps, review, decisions,
+        segs: eff, baseSegs: plan.segs, gaps, review, decisions, subs,
         // 「按当前决定应得的时长」与「磁盘上实际那一版」是两件事，别混用
         outDur: eff.reduce((a, [s, e]) => a + (e - s), 0) / (plan.speed || 1),
         curVer: cv.v, verDur: cv.item ? cv.item.dur ?? null : null, versions: versionList(name),
@@ -1336,9 +1346,16 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, "127.0.0.1", () => {
   console.log(`\n  剪辑台 → http://127.0.0.1:${PORT}\n`);
+  // 隐藏窗口启动后没有控制台可关，退出靠「停止」脚本按 PID 杀 —— 所以把 PID 落盘
+  try { fs.writeFileSync(PID_FILE, String(process.pid)); } catch {}
   // 免安装包靠这个开关在服务起来之后再开浏览器，避免用户看到"无法访问"白页
   if (process.env.XUNJIAN_OPEN_BROWSER === "1") openBrowser(`http://127.0.0.1:${PORT}`);
 });
+
+// 正常退出时清掉 PID 文件，避免「停止」脚本拿着旧 PID 去杀别的进程
+const dropPid = () => { try { fs.rmSync(PID_FILE, { force: true }); } catch {} };
+process.on("exit", dropPid);
+for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"]) process.on(sig, () => { dropPid(); process.exit(0); });
 
 // 端口占用不是异常：多半是用户双击了两次启动器，此时把已有实例的页面打开就行，
 // 否则窗口里只有一段 EADDRINUSE 堆栈，看起来像"程序坏了"。

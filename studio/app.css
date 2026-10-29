@@ -179,7 +179,10 @@ button,input{font-family:inherit;color:inherit}
 .versel[hidden]{display:none}
 .stage{flex:1;min-height:0;display:grid;place-items:center;background:
   radial-gradient(circle at 50% 45%,#131823,#0B0E14 70%);position:relative;overflow:hidden}
-.stage video{height:100%;width:auto;max-width:100%;object-fit:contain;display:block;background:transparent}
+/* 竖屏素材在宽面板里：靠百分比高度会被解析成「父级那块区域」而溢出版心，
+   索性让视频铺满 stage、由 object-fit:contain 自己留边 —— 任何比例都不会裁切 */
+.stage video{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;
+  display:block;background:transparent}
 .stage video:not([src]){display:none}
 .stage .empty{font-size:11.5px;color:var(--dim2);text-align:center;line-height:1.8}
 .stage .empty svg{width:26px;height:26px;display:block;margin:0 auto 10px;stroke:#3A4356;fill:none;stroke-width:1.4}
@@ -215,12 +218,43 @@ button,input{font-family:inherit;color:inherit}
 .tlcard{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px 14px;flex:none}
 .tlhead{display:flex;align-items:center;gap:10px;margin-bottom:10px}
 .tlhead .t{font-size:11.5px;color:#C6D0E2;font-weight:500}
+.substat{font-size:9.5px;color:var(--amber);padding:2px 7px;border-radius:5px;
+  background:rgba(242,169,59,.1);border:1px solid rgba(242,169,59,.22);white-space:nowrap}
+.substat[hidden]{display:none}
 .legend{margin-left:auto;display:flex;gap:10px;font-size:9.5px;color:var(--dim2)}
 .legend i{display:inline-flex;align-items:center;gap:4px;font-style:normal}
 .legend i:before{content:"";width:7px;height:7px;border-radius:2px;background:currentColor}
 .legend .l1{color:#3E7A5C}.legend .l2{color:#7A4040}.legend .l3{color:var(--amber)}
 .ruler{display:flex;justify-content:space-between;font-size:9px;color:#4B5468;
   font-family:ui-monospace,Menlo,monospace;padding:0 1px 5px}
+/* 字幕条：整片逐句字幕，按时间宽度铺开。点选 → 标记剪掉（只标记，应用后才落盘） */
+.subs{position:relative;height:24px;margin:0 0 6px;border-radius:6px;background:#0A0D13;
+  border:1px solid var(--line);overflow:hidden;cursor:pointer}
+.subs[hidden]{display:none}
+.subs .s{position:absolute;top:1px;bottom:1px;display:flex;align-items:center;padding:0 3px;
+  min-width:3px;box-sizing:border-box;border-radius:3px;background:#2C3546;color:#C3CFE2;
+  font-size:9.5px;line-height:1;white-space:nowrap;overflow:hidden;
+  transition:filter .12s}
+.subs .s:hover{filter:brightness(1.35)}
+.subs .s.on{outline:1.5px solid #9DB0FF;outline-offset:-1.5px;z-index:2;filter:brightness(1.45)}
+/* 已被算法剪掉的那段：仍列出来（好让人知道说过什么），但不可再操作 */
+.subs .s.alg{background:rgba(255,255,255,.05);color:#5A6480;text-decoration:line-through;cursor:default}
+.subs .s.alg:hover{filter:none}
+/* 自己标的「剪掉」：红底 + 划线，点一下可撤销 */
+.subs .s.cut{background:#B7332A;color:#FFDCD8;text-decoration:line-through}
+.subbar{display:flex;align-items:center;gap:8px;margin:-2px 0 6px;font-size:10.5px;color:var(--dim)}
+.subbar[hidden]{display:none}
+.subbar .sbi{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.subbar .sbi b{color:#C6D0E2;font-weight:500}
+.subbar .btn{height:23px;padding:0 10px;font-size:10.5px}
+.subbar .btn.mute{color:var(--dim2)}
+/* 字幕块的悬浮提示：块太窄放不下字时靠它看全文 */
+.subtip{position:fixed;z-index:60;max-width:320px;padding:5px 8px;border-radius:6px;
+  background:#0B0E14;border:1px solid rgba(255,255,255,.12);box-shadow:0 8px 20px rgba(0,0,0,.55);
+  font-size:10.5px;line-height:1.55;color:#D6DEEB;pointer-events:none;white-space:normal}
+.subtip[hidden]{display:none}
+.subtip b{display:block;color:var(--amber);font-weight:500;font-size:9.5px;
+  font-family:ui-monospace,Menlo,monospace;margin-bottom:2px}
 .track{position:relative;height:44px;border-radius:7px;overflow:hidden;background:#0D1016;
   border:1px solid var(--line);cursor:pointer}
 .wave{position:absolute;inset:0;display:flex;align-items:center;gap:2px;padding:0 1px;opacity:.45}

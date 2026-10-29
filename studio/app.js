@@ -17,6 +17,7 @@ const S = {
   cfg: null, file: null, name: null,
   projects: [], autoTried: new Set(),
   tl: null, review: [], decisions: {}, active: null, media: null,
+  subCuts: [], subSel: null,   // 字幕条：自己标的「剪掉」区间 / 当前选中的第几句
   versions: [], curVer: 0, viewVer: 0,
   running: false, mode: "cut", src: "proxy", timer: null,
   range: null,
@@ -171,7 +172,9 @@ async function loadProjects() {
 function resetProjectView() {
   S.tl = null; S.review = []; S.decisions = {}; S.active = null; S.media = null;
   S.versions = []; S.curVer = 0; S.viewVer = 0; S.range = null;
-  $("pins").innerHTML = ""; $("gaps").innerHTML = ""; $("ruler").innerHTML = "";
+  S.subCuts = []; S.subSel = null;
+  $("pins").innerHTML = ""; $("gaps").innerHTML = ""; $("ruler").innerHTML = ""; $("subs").innerHTML = "";
+  $("subBar").hidden = true;
   $("statDur").textContent = "—"; $("statSegs").textContent = "—";
   $("stQueue").textContent = "—"; $("rvCount").textContent = "0 处";
   $("rvProg").textContent = "已确认 0 · 剩余 0";
@@ -382,6 +385,7 @@ $("aiGo").onclick = async () => {
     // 重跑=换了一套基线：清掉版面状态，等新结果回来再由 poll 填
     S.running = true; S.mode = "cut";
     S.tl = null; S.review = []; S.decisions = {}; S.active = null;
+    S.subCuts = []; S.subSel = null; $("subs").innerHTML = ""; $("subBar").hidden = true;
     setStatus(`重跑中 v${r.from || 1} → v${r.to}`, "● 运行中", "warn");
     toast(`已开始重跑，结果会是 v${r.to}`);
     pollStart();
@@ -478,6 +482,8 @@ function decisionFor(item, decisions) {
   let best = null, bestOv = 0;
   for (const d of decisions) {
     if (!d || d.choice == null) continue;
+    // 字幕条标的剪切是「手剪」，不参与审核项的回显，否则会把某条审核项错判成已确认
+    if (d.kind === "sub") continue;
     for (const r of d.cuts || []) {
       if (!Array.isArray(r) || r.length !== 2) continue;
       const ov = Math.min(item.e, r[1]) - Math.max(item.s, r[0]);
@@ -506,9 +512,17 @@ async function loadTimeline(syncVer = true) {
     if (d) S.decisions[it.id] = d.choice;
   }
   S.active = S.review.length ? S.review[0].id : null;
+  // 字幕条的手剪区间从 overrides.json 回读：刷新页面不该丢掉刚标的段落
+  S.subCuts = (tl.decisions || [])
+    .filter((d) => d && d.kind === "sub" && d.choice === "cut")
+    .flatMap((d) => (d.cuts || []).filter((r) => Array.isArray(r) && r.length === 2).map((r) => [+r[0], +r[1]]));
+  S.subSel = null;
+  $("subBar").hidden = true;
   $("stQueue").textContent = `${S.review.length} 条`;
   $("rvCount").textContent = `${S.review.length} 处`;
   paintRuler();
+  paintSubs();
+  paintSubStat();
   paintGaps();
   paintPins();
   paintReview();
@@ -586,6 +600,81 @@ function paintGaps() {
   const dur = S.tl.rawDur || 1;
   $("gaps").innerHTML = S.tl.gaps.map(([a, b]) =>
     `<i style="left:${(a / dur) * 100}%;width:${((b - a) / dur) * 100}%"></i>`).join("");
+}
+
+// ── 字幕条 ──
+// 铺的是「原片逐句字幕」（raw-segs），不是保留段：已剪的句子也要在，否则看不出某句为什么不见了。
+// 三种状态：可剪 / alg（算法已剪，灰掉不可点）/ cut（自己标的剪掉，等「应用并重剪」落盘）
+function subKeptLen(x) {
+  let n = 0;
+  for (const [a, b] of S.tl.baseSegs || []) n += Math.max(0, Math.min(x.e, b) - Math.max(x.s, a));
+  return n;
+}
+const subIsAlg = (x) => subKeptLen(x) < (x.e - x.s) * 0.55;
+const subIsCut = (x) => S.subCuts.some(([a, b]) =>
+  Math.min(x.e, b) - Math.max(x.s, a) > (x.e - x.s) * 0.5);
+
+function paintSubs() {
+  const box = $("subs");
+  const list = (S.tl && S.tl.subs) || [];
+  if (!list.length) { box.innerHTML = ""; box.hidden = true; return; }
+  box.hidden = false;
+  const dur = S.tl.rawDur || 1;
+  const W = box.clientWidth || 0;
+  box.innerHTML = list.map((x, i) => {
+    const alg = subIsAlg(x);
+    const cut = !alg && subIsCut(x);
+    const cls = ["s", alg ? "alg" : "", cut ? "cut" : "", i === S.subSel ? "on" : ""].filter(Boolean).join(" ");
+    const l = (x.s / dur) * 100, w = ((x.e - x.s) / dur) * 100;
+    // 切细之后很多块只有十几像素宽，字塞进去只剩半个偏旁 —— 放不下就不放，全文留在 title 里
+    const pw = (w / 100) * W;
+    const label = pw >= 26 ? esc(x.z) : pw >= 13 ? esc(x.z.slice(0, 1)) : "";
+    return `<div class="${cls}" data-i="${i}" style="left:calc(${l}% + 1px);width:calc(${w}% - 2px)"
+      title="${esc(`${fmt(x.s)}–${fmt(x.e)} · ${x.z}`)}">${label}</div>`;
+  }).join("");
+}
+
+function paintSubBar() {
+  const x = S.tl && S.subSel != null ? (S.tl.subs || [])[S.subSel] : null;
+  if (!x) { $("subBar").hidden = true; return; }
+  const cut = subIsCut(x);
+  $("subBar").hidden = false;
+  $("subInfo").innerHTML =
+    `<b>${fmt(x.s)}–${fmt(x.e)}</b> · ${esc(x.z.slice(0, 40))}${x.z.length > 40 ? "…" : ""}`;
+  $("subToggle").textContent = cut ? "恢复这段" : "剪掉这段";
+}
+
+// 顶部统计：已标几段、合计多少秒（只标记不落盘，所以要说清"待剪"）
+function paintSubStat() {
+  const el = $("subStat");
+  if (!el) return;
+  const n = S.subCuts.length;
+  if (!n) { el.hidden = true; el.textContent = ""; return; }
+  const sec = S.subCuts.reduce((a, [s, e]) => a + (e - s), 0);
+  el.hidden = false;
+  el.textContent = `字幕条已标 ${n} 段 · 待剪 ${sec.toFixed(1)}s`;
+}
+
+function selectSub(i) {
+  const x = S.tl && (S.tl.subs || [])[i];
+  if (!x) return;
+  if (subIsAlg(x)) return toast("这段已经被算法剪掉了");
+  S.subSel = S.subSel === i ? null : i;
+  paintSubs(); paintSubBar();
+  if (S.subSel != null) seekTo(x.s + 0.05);
+}
+
+function toggleSubCut() {
+  const x = S.tl && S.subSel != null ? (S.tl.subs || [])[S.subSel] : null;
+  if (!x) return;
+  if (subIsCut(x)) {
+    S.subCuts = S.subCuts.filter(([a, b]) => Math.min(x.e, b) - Math.max(x.s, a) <= (x.e - x.s) * 0.5);
+    toast("已恢复这段");
+  } else {
+    S.subCuts.push([+x.s.toFixed(3), +x.e.toFixed(3)]);
+    toast(`已标记剪掉 ${fmt(x.s)}–${fmt(x.e)} —— 点「应用并重剪」才生效`);
+  }
+  paintSubs(); paintSubBar(); paintSubStat();
 }
 
 function paintPins() {
@@ -689,6 +778,8 @@ $("btnApply").onclick = async () => {
       const opt = (it.options || []).find((o) => (S.decisions[it.id] === "cut" ? o.label !== "保留" && o.label !== "保持不剪" : o.label === "保留" || o.label === "保持不剪"));
       return { id: it.id, kind: it.kind, choice: S.decisions[it.id], cuts: opt ? opt.cuts : [] };
     });
+  // 字幕条标的区间一起落盘。带 kind=sub 是为了回读时不被当成某条审核项的决定
+  for (const [s, e] of S.subCuts) decisions.push({ kind: "sub", choice: "cut", cuts: [[s, e]] });
   try {
     await postJSON("/api/decisions", { name: S.name, decisions });
     S.running = true;
@@ -924,6 +1015,49 @@ $("track").onclick = (e) => {
   const f = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
   seekTo(f * S.tl.rawDur);
 };
+
+// 字幕条：单击选中并定位、双击直接标/撤「剪掉」、Delete 同效（手不用离开键盘）
+$("subs").addEventListener("click", (e) => {
+  const el = e.target.closest(".s");
+  if (el) selectSub(Number(el.dataset.i));
+});
+$("subs").addEventListener("dblclick", (e) => {
+  const el = e.target.closest(".s");
+  if (!el) return;
+  const x = (S.tl.subs || [])[Number(el.dataset.i)];
+  if (!x || subIsAlg(x)) return toast("这段已经被算法剪掉了");
+  S.subSel = Number(el.dataset.i);
+  toggleSubCut();
+});
+$("subToggle").onclick = toggleSubCut;
+$("subClose").onclick = () => { S.subSel = null; paintSubs(); paintSubBar(); };
+
+// 细切之后一块只有十来像素，字放不下 —— 悬停立刻把「时间 + 全文」浮出来，
+// 不用等浏览器原生 title 的一秒延迟，也不必先点一下才知道自己要删哪句
+const subTip = document.createElement("div");
+subTip.className = "subtip";
+subTip.hidden = true;
+document.body.appendChild(subTip);
+
+$("subs").addEventListener("mousemove", (e) => {
+  const el = e.target.closest(".s");
+  const x = el && S.tl ? (S.tl.subs || [])[Number(el.dataset.i)] : null;
+  if (!x) { subTip.hidden = true; return; }
+  subTip.innerHTML = `<b>${fmt(x.s)}–${fmt(x.e)}</b>${esc(x.z)}`;
+  subTip.hidden = false;
+  const w = subTip.offsetWidth, h = subTip.offsetHeight;
+  subTip.style.left = `${Math.min(e.clientX + 12, innerWidth - w - 10)}px`;
+  subTip.style.top = `${Math.max(8, e.clientY - h - 12)}px`;
+});
+$("subs").addEventListener("mouseleave", () => { subTip.hidden = true; });
+document.addEventListener("keydown", (e) => {
+  if (S.subSel == null) return;
+  const el = e.target || {};
+  const tag = String(el.tagName || "").toLowerCase();
+  if (tag === "input" || tag === "textarea" || tag === "select" || el.isContentEditable) return;
+  if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); toggleSubCut(); }
+  else if (e.key === "Escape") { S.subSel = null; paintSubs(); paintSubBar(); }
+});
 
 // 波形（装饰，按宽度铺满）
 function paintWave() {
