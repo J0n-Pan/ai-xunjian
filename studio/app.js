@@ -1070,7 +1070,7 @@ function paintWave() {
     return `<b style="height:${(10 + rnd() * 30 * env).toFixed(1)}px"></b>`;
   }).join("");
 }
-window.addEventListener("resize", () => { if (S.tl) { paintWave(); paintRuler(); } });
+window.addEventListener("resize", () => { if (S.tl) { paintWave(); paintRuler(); paintSubs(); } });
 
 // ───────────────────────── 导出 ─────────────────────────
 // 「更改」：网页拿不到本地绝对路径（<input webkitdirectory> 只给相对名），
