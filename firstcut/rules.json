@@ -16,7 +16,7 @@
     "relaxStepDb": 3,
     "relaxMaxTries": 4,
     "keepGapSec": 0.2,
-    "minSpeechTotalSec": 1.0
+    "minSpeechTotalSec": 1
   },
   "segment": {
     "minKeptSec": 0.25,
@@ -31,7 +31,8 @@
       "fineTailPadSec": 0.02,
       "speechGuardSec": 0.08
     },
-    "edgeFadeSec": 0.03
+    "edgeFadeSec": 0.04,
+    "_edgeFadeNote": "拼接点单侧淡化秒数(2026-10-29 起 0.05)：afade 采样级 V 形，两侧各 50ms。原来 0.03 用的 volume eval=frame，按音频帧(21.3ms)采样，最小增益到不了 0，等于没压住突跳。"
   },
   "retake": {
     "sim": 0.8,
@@ -44,7 +45,7 @@
     "prefixSimMin": 0.85,
     "_lcpNote": "LCP 判据：两相邻句段开头连续一致 ≥ lcpMin 字、且间隔 ≤ lcpGapSec 秒 → 判为重说（补相似度判据的漏检；实测真重说 LCP 7~14，其余相邻对 ≤5 且间隔远大于 2s）。",
     "lcpMin": 6,
-    "lcpGapSec": 2.0,
+    "lcpGapSec": 2,
     "_dupNote": "近乎逐字重复：两相邻句段整句相似度 ≥ dupSim 且间隔 ≤ dupGapSec 秒 → 判为重说（实测三素材全部 full≥0.85 的近邻对都是真重说）。",
     "dupSim": 0.9,
     "dupGapSec": 20,
@@ -55,7 +56,7 @@
   },
   "stutter": {
     "_note": "卡壳重说检测。两套判据按 ASR provider 互斥启用：local(whisper) 用 longWordSec/cpsThreshold —— whisper 把停顿吸收进词时长，卡壳处会出现 >1s 的单字、且整段 cps 掉到 2.8；cloud(paraformer-v2) 这两个前提都不成立（实测 376 字 p50=0.16s/p95=0.36s/max=0.73s，句段 cps 4.58~6.44 无区分度），改用 minRepeatChars 等『段内假起头』判据。",
-    "longWordSec": 1.0,
+    "longWordSec": 1,
     "cpsThreshold": 3.5,
     "minSegSec": 1.5,
     "minChars": 4,
@@ -64,7 +65,7 @@
     "minRepeatChars": 5,
     "maxHeadChars": 12,
     "innerMinChars": 14,
-    "innerMaxCutSec": 3.0,
+    "innerMaxCutSec": 3,
     "tailMinChars": 8,
     "_leadNote": "段首引导语被打断：段内首个 ≥leadPauseSec 停顿之前 ≤leadMaxChars 字、且以『我觉得/我想/我认为/我看/我感觉/就是说/就是/然后/那么/所以/因为/但是』结尾，停顿之后 ≥8 字且以枚举/承接词开头 → 只删『引导语+停顿』，不整句删。实测 c3『第三点我觉得‖停顿 0.47s‖最后一点，我觉得习惯也特别的重要』，删 1.41s 后保留论点话题句。",
     "leadRestart": true,
@@ -136,7 +137,7 @@
     "language": "zh",
     "hotwordsOffForRaw": true,
     "_chunkNote": "20s 分块。实测 10s 分块虽然能多认出个别短词，但文本整体变差(错字/半句增多)，反而让语义扫描误剪，故维持 20s。20s 块会吞掉的短语气词由 asr 后的「段级复核」(XUNJIAN_SEGCHECK) 补回，只影响语气词候选、不改分段结构。",
-    "chunkSec": 20.0,
+    "chunkSec": 20,
     "chunkOverlapSec": 0.5,
     "coverageGapSec": 2.5,
     "chunkRetry": 3,
@@ -144,11 +145,11 @@
     "_densityNote": "v4.1 密度体检：句段『跨了很长时长却几乎没字』= 块内跳读（实测 C0793 一个 20s 段只出 9 字），按『区间覆盖』查不出来。跨 ≥densityMinSpanSec 的段若 字/秒 < minCharsPerSec 即判稀疏，切碎成 refineChunkSec 小块回炉。",
     "minCharsPerSec": 1.2,
     "densityMinSpanSec": 2.5,
-    "refineChunkSec": 6.0,
+    "refineChunkSec": 6,
     "_t2sNote": "繁转简(v5.1)：关热词后 whisper small 会输出繁体(实测 C0793 整片繁体、字幕直接不合格)。优先用 zhconv(t2s)，缺失时用内置常用字表兜底。关闭:XUNJIAN_T2S=off。",
     "t2s": true,
     "segcheck": true,
-    "segcheckChunkSec": 8.0,
+    "segcheckChunkSec": 8,
     "_segcheckNote": "细通道复核：用 8s 小分块再转一遍全片，只用于补出被 20s 块吞掉的语气词(这个/那个)。上下文偏差不影响成片结构(结构/字幕用主通道)。关闭：XUNJIAN_SEGCHECK=off。"
   },
   "caption": {
@@ -422,7 +423,7 @@
   },
   "encode": {
     "_speedNote": "1.0 = 不提速（v7 起默认）。1.0 时滤镜图走 null/anull，不做 setpts/atempo，避免重采样损失音质。命令行 --speed 1.2 可覆盖。",
-    "speed": 1.0,
+    "speed": 1,
     "crf": 18,
     "preset": "fast",
     "gopFrames": 15,
@@ -475,5 +476,11 @@
     "minConfidence": 0.6,
     "onUnknownId": "ignore",
     "onMissingId": "algo"
+  },
+  "noiseScan": {
+    "_note": "无转写噪声段检测(2.9)：ASR 无字 + 平均电平 ≤ 噪声门-3dB + 峰值 ≥ 噪声门+6dB + 峰均差 ≥10dB 即自动删。",
+    "minSec": 0.5,
+    "maxSec": 8,
+    "maxScan": 40
   }
 }

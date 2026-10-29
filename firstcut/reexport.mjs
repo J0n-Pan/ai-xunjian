@@ -84,7 +84,11 @@ if (!segs.length) {
 
 // ── 生成滤镜图（与 run.mjs 共用 cutfilters：单链 select，含拼接点淡化）──
 const SPEED = plan.speed || 1;
-const FADE = Math.max(0, Number(plan.fade ?? R.segment.edgeFadeSec ?? 0));
+// fade 优先级：环境变量 > rules.json > 计划里冻结的值。
+// 为什么不优先用 plan.fade：它是首剪那一刻的参数快照，等于把旧的淡化算法永久钉在老工程上 ——
+// 改好 cutfilters 后，老工程重剪还是"生硬"的老样子，用户会觉得修复没生效。
+// fade 只影响拼接处的平滑度，不改内容也不改时长，所以跟着版本走没有副作用。
+const FADE = Math.max(0, Number(process.env.XUNJIAN_EDGE_FADE ?? R.segment.edgeFadeSec ?? plan.fade ?? 0));
 const fc = buildCutFilter(segs, { speed: SPEED, fade: FADE });
 
 // ── 版本链：每次重剪都产出一个新文件，绝不覆盖上一版 ──

@@ -8,7 +8,7 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { detectRetakes, detectStutters, detectFillers, findTier2, subtractRanges, retakeSuffixOk } from "./retake.mjs";
-import { clipReviewItems } from "./review-clip.mjs";
+import { clipReviewItems, applyDecisions } from "./review-clip.mjs";
 import { resolveNoteDirectives } from "./note-directive.mjs";
 import { homeOf } from "./home.mjs";
 import { buildCutFilter } from "./cutfilters.mjs";
@@ -1235,6 +1235,15 @@ if (!NO_RETAKE) {
     return out.sort((a, b) => a[1] - b[1]);
   };
   const TAILK = 4, TAILGAP = 3.0, TAILCUTMAX = 2.5, TAILMINLEFT = 0.8;
+  // 护栏（2026-10-29 实测）：删完只剩几个字 → 成片里是个孤字硬拼，比不剪难听得多。
+  const TAILMINHEAD = 4;
+  // 护栏（2026-10-29 实测）：**同一 ASR 句内**的重复不是跨段假起头，是顶真/设问修辞。
+  // 反例：「考阅读理解，阅读理解怎么去做啊？」—— 气口在中间 0.27s 停顿处切开，前段尾 4 字
+  // 与后段首 4 字都是「阅读理解」，规则把前段的「阅读理解」整段删掉，成片变成
+  // 「考 /（硬拼）/ 阅读理解怎么去做啊」：既丢了论题词，又多了个 0.25s 的孤字。
+  // 真卡壳（C0777「…相反的一个脾气。」→「相反的一个脾气一点就着」）是**两句** ASR，
+  // 间隔 2.22s，不会命中这条护栏。
+  const inOneAsr = (t0, t1) => RAW_SEGS.some((sg) => sg.s <= t0 + 0.05 && sg.e >= t1 - 0.05);
   const hits = [];
   for (let i = 0; i < segs.length - 1; i++) {
     const a = charsOf(segs[i]), b = charsOf(segs[i + 1]);
@@ -1246,6 +1255,8 @@ if (!NO_RETAKE) {
     }
     if (!ok) continue;
     const cutAt = a[a.length - k][1];
+    if (a.length - k < TAILMINHEAD) continue;
+    if (inOneAsr(cutAt, segs[i + 1][0])) continue;
     const dur = segs[i][1] - cutAt;
     if (dur < 0.2 || dur > TAILCUTMAX) continue;
     hits.push({ i, k, cutAt, dur, tail: a.slice(a.length - k).map((c) => c[0]).join("") });
@@ -1312,6 +1323,83 @@ if (!NO_RETAKE) {
     cutsGlobal = [...cutsGlobal, ...iso.map((x) => x.seg)].sort((a, b) => a[0] - b[0]);
     console.log(`  清理中间孤立残句 ${iso.length} 处（前后均长静音、字数极少，判为半截话）：`);
     for (const x of iso) console.log(`    ✂ [${x.seg[0].toFixed(2)}-${x.seg[1].toFixed(2)}]「${x.txt}」`);
+  }
+}
+// ── 2.9 无转写噪声段：有能量、但 ASR 一个字都没识别出来 ──
+// 起因（2026-10-29 实测）：01:37–01:39 有一处翻纸/碰麦噪声，silencedetect 完全看不到它 ——
+//   该段 mean -31.2dB（同一素材人声段 -11.5dB），但 max 到 -13.4dB。
+//   间歇峰值让「连续静音 ≥0.35s」永远不成立，于是它被当成语音段留在成片里，就是 1.5s 杂音。
+// 判据（全部满足）：
+//   ① 落在保留段内、且不在任何 ASR 逐字时间戳覆盖范围内（连语气词都没识别出来）；
+//   ② 时长 ≥0.5s（更短的多是字间换气，删了反而把词咬断）；
+//   ③ 平均电平 ≤ 噪声门-3dB（大部分时间其实在"静音"电平），且峰值 ≥ 噪声门+6dB（有瞬态）；
+//   ④ 峰值比平均高 ≥10dB（宽带瞬态；稳态底噪不会有这种落差）；
+//   ⑤ 时长 ≤8s（更长的多半是音乐/环境声，不自动处理）。
+// 命中即删（与 tier1 语气词同一档自动动作），逐条进日志；XUNJIAN_NOISE_CUT=0 关闭。
+{
+  const AUTO = process.env.XUNJIAN_NOISE_CUT !== "0";
+  if (AUTO && RAW_SEGS.length) {
+    // ASR 覆盖表（逐字时间戳合并；没有 w 的 provider 退化成整句覆盖）
+    const cov = [];
+    for (const sg of RAW_SEGS) {
+      const ws = Array.isArray(sg.w) && sg.w.length ? sg.w : [[sg.s, sg.e]];
+      for (const w of ws) {
+        const a = Number(w[0]), b = Number(w[1]);
+        if (!Number.isFinite(a) || !Number.isFinite(b) || b <= a) continue;
+        const last = cov[cov.length - 1];
+        if (last && a <= last[1] + 0.03) last[1] = Math.max(last[1], b);
+        else cov.push([a, b]);
+      }
+    }
+    cov.sort((x, y) => x[0] - y[0]);
+    // 段内空洞
+    const GAPMIN = R.noiseScan?.minSec ?? 0.5;
+    const holes = [];
+    for (const [S, E] of segs) {
+      let cur = S;
+      for (const [a, b] of cov) {
+        if (b <= S + 0.02 || a >= E - 0.02) continue;
+        if (a - cur >= GAPMIN) holes.push([Math.max(cur, S), Math.min(a, E)]);
+        cur = Math.max(cur, b);
+      }
+      if (E - cur >= GAPMIN) holes.push([Math.max(cur, S), E]);
+    }
+    const probe = ([a, b]) => {
+      const out = run(FFMPEG, ["-hide_banner", "-ss", a.toFixed(3), "-to", b.toFixed(3),
+        "-i", input, "-vn", "-af", "volumedetect", "-f", "null", "-"]).stderr || "";
+      return {
+        mean: Number((/mean_volume:\s*(-?[\d.]+) dB/.exec(out) || [])[1]),
+        max: Number((/max_volume:\s*(-?[\d.]+) dB/.exec(out) || [])[1]),
+      };
+    };
+    const MAXSCAN = R.noiseScan?.maxScan ?? 40;
+    const hits = [];
+    for (const h of holes.slice(0, MAXSCAN)) {
+      const d = h[1] - h[0];
+      if (d > (R.noiseScan?.maxSec ?? 8)) continue;
+      const { mean, max } = probe(h);
+      if (!Number.isFinite(mean) || !Number.isFinite(max)) continue;
+      if (mean > NOISE - 3) continue;
+      if (max < NOISE + 6) continue;
+      if (max - mean < 10) continue;
+      hits.push({ s: h[0], e: h[1], mean, max });
+    }
+    if (hits.length) {
+      // 两端各留 30ms：ASR 词边界本身有 ±20ms 误差，贴边切会咬到相邻字
+      const picked = hits
+        .map((h) => ({ ...h, a: +(h.s + 0.03).toFixed(3), b: +(h.e - 0.03).toFixed(3) }))
+        .filter((h) => h.b - h.a >= 0.3);
+      if (picked.length) {
+        const cuts = picked.map((h) => [h.a, h.b]);
+        segs = applyDecisions(segs, [{ choice: "cut", cuts }]);
+        cutsGlobal = [...cutsGlobal, ...cuts].sort((a, b) => a[0] - b[0]);
+        console.log(`  ✂ 无字噪声段 ${cuts.length} 处（有能量但 ASR 无字，判为翻纸/碰麦/桌面噪声）：`);
+        for (const h of picked) {
+          console.log(`    [${h.a.toFixed(2)}-${h.b.toFixed(2)}] ${(h.b - h.a).toFixed(2)}s` +
+            ` · mean ${h.mean.toFixed(1)}dB / max ${h.max.toFixed(1)}dB（噪声门 ${NOISE}dB）`);
+        }
+      }
+    }
   }
 }
 // ── 3. 剪切 + 提速 + 转码（编辑器友好的密集关键帧）──
