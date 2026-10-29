@@ -626,9 +626,10 @@ function paintSubs() {
     const cut = !alg && subIsCut(x);
     const cls = ["s", alg ? "alg" : "", cut ? "cut" : "", i === S.subSel ? "on" : ""].filter(Boolean).join(" ");
     const l = (x.s / dur) * 100, w = ((x.e - x.s) / dur) * 100;
-    // 块宽只够 1 个字时，单字反而像杂讯（也看不出是哪半句）；放不下就留空，全文交给悬停与按钮栏
+    // 块宽只够 1~2 个字时，露半个词反而更难认（"所…"这种）。放不下 3 个字就留空，
+    // 全文交给悬停提示与选中后的按钮栏
     const pw = (w / 100) * W;
-    const label = pw >= 26 ? esc(x.z) : "";
+    const label = pw >= 34 ? esc(x.z) : "";
     return `<div class="${cls}" data-i="${i}" style="left:calc(${l}% + 1px);width:calc(${w}% - 2px)"
       title="${esc(`${fmt(x.s)}–${fmt(x.e)} · ${x.z}`)}">${label}</div>`;
   }).join("");

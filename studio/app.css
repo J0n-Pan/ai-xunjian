@@ -231,9 +231,11 @@ button,input{font-family:inherit;color:inherit}
 .subs{position:relative;height:24px;margin:0 0 6px;border-radius:6px;background:#0A0D13;
   border:1px solid var(--line);overflow:hidden;cursor:pointer}
 .subs[hidden]{display:none}
-.subs .s{position:absolute;top:1px;bottom:1px;display:flex;align-items:center;padding:0 3px;
+/* 注意：这里不能用 display:flex —— flex 容器里的文字会变成匿名 flex item，
+   text-overflow:ellipsis 不生效，窄块就会把字从中间切开。用 block + line-height 居中。 */
+.subs .s{position:absolute;top:1px;bottom:1px;display:block;padding:0 3px;
   min-width:3px;box-sizing:border-box;border-radius:3px;background:#2C3546;color:#C3CFE2;
-  font-size:9.5px;line-height:1;white-space:nowrap;overflow:hidden;
+  font-size:9.5px;line-height:22px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
   transition:filter .12s}
 .subs .s:hover{filter:brightness(1.35)}
 .subs .s.on{outline:1.5px solid #9DB0FF;outline-offset:-1.5px;z-index:2;filter:brightness(1.45)}
