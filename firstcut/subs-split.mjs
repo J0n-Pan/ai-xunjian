@@ -1,19 +1,21 @@
-// 把 ASR 的「整句字幕」再切成更细的小块，供剪辑台的字幕条使用。
+// 把 ASR 的「整句字幕」切成更细的小块，供剪辑台的字幕条使用。
 //
-// 为什么需要：ASR 的 raw-segs 是句子级的，一段常有 6~12 秒。用户点一格就删掉十几秒，
-// 颗粒度太粗。这里用字/词级时间戳（w: [[s,e,text],...]）在标点和词边界上再切一刀，
-// 得到 1~3 秒级别的小块；时间戳一律来自 ASR，不做比例估算（除了 w 缺失时的兜底）。
+// 两条硬规则，都是为了不把词切开：
+//   ① 只在标点处切（，。？！；：、…）—— 标点天然是词边界；
+//   ② 分句仍过长时，只在该句内部的「停顿」处切（相邻字之间 ≥120ms 的静音）。
+// **绝不按字数切**：ASR 的 w 是逐字时间戳（"本身" 会拆成 本/身 两条），
+// 拿它当词边界会把「本身」劈成「本 | 身」，这正是之前字幕条断句碎掉的原因。
+// 实在没有停顿又超长的句子，宁可留长一点，也不切词。
 const PUNCT = new Set([..."，,。.！!？?；;：:、…·"]);
 
 const isPunct = (ch) => PUNCT.has(ch);
 const isSpace = (ch) => /\s/.test(ch);
 
-// 把 z 的每个字符映射到时间区间。返回 { st, en, tok }：st/en 为字符起止，tok 标记新词起点。
+// 每个字符对应的时间区间。st/en 按 w 的字级时间戳填，标点归到前一字末尾。
 function buildTimeline(z, w, s0, e0) {
   const n = z.length;
   const st = new Array(n).fill(null);
   const en = new Array(n).fill(null);
-  const tok = new Array(n).fill(false);
 
   let ci = 0;
   let prevEnd = s0;
@@ -25,42 +27,35 @@ function buildTimeline(z, w, s0, e0) {
     const ws = +it?.[0];
     const we = +it?.[1];
     if (!txt || !Number.isFinite(ws) || !Number.isFinite(we) || we < ws) continue;
-    // ASR 偶尔会有空格/标点误差，用 indexOf 从上次位置往后找，跳过的字符归到上一个词尾
     const k = z.indexOf(txt, ci);
     if (k < 0) { miss++; continue; }
     for (let i = ci; i < k; i++) { st[i] = prevEnd; en[i] = prevEnd; }
     for (let i = k; i < k + txt.length && i < n; i++) { st[i] = ws; en[i] = we; }
-    if (k < n) tok[k] = true;
     ci = k + txt.length;
     prevEnd = we;
     hits++;
   }
   for (let i = ci; i < n; i++) { st[i] = prevEnd; en[i] = prevEnd; }
 
-  // 词条对不上（英文/数字混排等）：整句按字数比例兜底，至少不会错位到别的句子
+  // 对不上（英文/数字混排等）：整句按字数均分。只用来算时间，不当作切点。
   const broken = !hits || miss > Math.max(2, hits * 0.2) || st.some((v) => v == null);
   if (broken) {
     const real = [];
     for (let i = 0; i < n; i++) if (!isSpace(z[i])) real.push(i);
     const span = (e0 - s0) / Math.max(1, real.length);
     real.forEach((i, k) => {
-      st[i] = s0 + span * k;
-      en[i] = s0 + span * (k + 1);
-      if (k === 0) st[i] = s0;
-      if (k === real.length - 1) en[i] = e0;
+      st[i] = k === 0 ? s0 : s0 + span * k;
+      en[i] = k === real.length - 1 ? e0 : s0 + span * (k + 1);
     });
-    // 没有词边界信息时，把每个字都当成可切点，否则这类长句（常见于纯口播 ASR 漏词）
-    // 会整段 10 秒以上切不动
-    tok.fill(false);
-    for (const i of real) tok[i] = true;
   }
-  return { st, en, tok };
+  return { st, en, broken };
 }
 
 export function splitSubs(segs, opt = {}) {
-  const maxDur = opt.maxDur ?? 3.6;
-  const maxChars = opt.maxChars ?? 14;
-  const minDur = opt.minDur ?? 0.4;
+  const maxDur = opt.maxDur ?? 4.5;     // 一个分句超过这个时长才考虑在停顿处再切
+  const minGap = opt.minGap ?? 0.12;    // 停顿门槛：小于这个不当切点（气口/字间抖动）
+  const mergeDur = opt.mergeDur ?? 1.0; // 短于这个的分句并进邻居，避免出现点不中的细格子
+  const mergeCap = opt.mergeCap ?? 3.2; // 合并后的上限
   const out = [];
 
   for (const seg of segs || []) {
@@ -69,52 +64,71 @@ export function splitSubs(segs, opt = {}) {
     const e0 = +seg?.e;
     if (!z || !Number.isFinite(s0) || !Number.isFinite(e0) || !(e0 > s0)) continue;
 
-    const tl = buildTimeline(z, seg.w, s0, e0);
+    const { st, en, broken } = buildTimeline(z, seg.w, s0, e0);
+
     const span = (a, b) => {          // 字符区间 [a,b) 的时间与字数
       let s = Infinity, e = -Infinity, c = 0;
       for (let i = a; i < b && i < z.length; i++) {
         if (isSpace(z[i])) continue;
-        if (tl.st[i] != null) s = Math.min(s, tl.st[i]);
-        if (tl.en[i] != null) e = Math.max(e, tl.en[i]);
+        if (st[i] != null) s = Math.min(s, st[i]);
+        if (en[i] != null) e = Math.max(e, en[i]);
         if (!isPunct(z[i])) c++;
       }
       return { s: Number.isFinite(s) ? s : s0, e: Number.isFinite(e) ? e : e0, c };
     };
 
-    const cuts = [];                  // 先按标点切
+    // ① 先按标点切
+    const rough = [];
     let a = 0;
     for (let i = 0; i < z.length; i++) {
-      if (isPunct(z[i])) { cuts.push([a, i + 1]); a = i + 1; }
+      if (isPunct(z[i])) { rough.push([a, i + 1]); a = i + 1; }
     }
-    if (a < z.length) cuts.push([a, z.length]);
+    if (a < z.length) rough.push([a, z.length]);
 
-    const fine = [];
-    const cutLong = (b, e) => {       // 仍然过长的块：在词边界上二分
-      const { s, e: eEnd, c } = span(b, e);
-      if (eEnd - s <= maxDur && c <= maxChars) { fine.push([b, e]); return; }
-      const mid = s + (eEnd - s) / 2;
-      let best = -1, bestScore = Infinity;
+    // ② 仍过长的，只在停顿处再切；没有停顿就整段留着（宁可粗，不可断词）
+    const parts = [];
+    const cutAtPause = (b, e) => {
+      const sp = span(b, e);
+      if (sp.e - sp.s <= maxDur || broken) { parts.push([b, e]); return; }
+      const mid = sp.s + (sp.e - sp.s) / 2;
+      let best = -1, bestScore = -Infinity;
       for (let i = b + 1; i < e; i++) {
-        if (!tl.tok[i] || isPunct(z[i]) || isSpace(z[i])) continue;
-        const cs = span(b, i), ce = span(i, e);
-        if (cs.c < 2 || ce.c < 2) continue;
-        const gap = Math.max(0, (tl.st[i] ?? 0) - (tl.en[i - 1] ?? 0));
-        const score = Math.abs((tl.st[i] ?? mid) - mid) - gap * 0.9;
-        if (score < bestScore) { bestScore = score; best = i; }
+        const gap = (st[i] ?? 0) - (en[i - 1] ?? 0);
+        if (gap < minGap) continue;
+        if (span(b, i).c < 2 || span(i, e).c < 2) continue;
+        const into = (st[i] - sp.s) / (sp.e - sp.s);
+        if (into < 0.2 || into > 0.8) continue;   // 别在两端切出一两个字
+        const score = gap - Math.abs(st[i] - mid) * 0.06;
+        if (score > bestScore) { bestScore = score; best = i; }
       }
-      if (best < 0) { fine.push([b, e]); return; }
-      cutLong(b, best);
-      cutLong(best, e);
+      if (best < 0) { parts.push([b, e]); return; }
+      cutAtPause(b, best);
+      cutAtPause(best, e);
     };
-    for (const [b, e] of cuts) cutLong(b, e);
+    for (const [b, e] of rough) cutAtPause(b, e);
 
-    for (const [b, e] of fine) {
+    // ③ 过短的分句并进邻居（同一句内），合并后不超过 mergeCap
+    for (let i = 0; i < parts.length; i++) {
+      const [b, e] = parts[i];
+      const cur = span(b, e);
+      const prev = i > 0 ? span(parts[i - 1][0], parts[i - 1][1]) : null;
+      const next = i < parts.length - 1 ? span(parts[i + 1][0], parts[i + 1][1]) : null;
+      if (cur.e - cur.s >= mergeDur) continue;
+      if (prev && cur.e - prev.s <= mergeCap) {
+        parts[i - 1][1] = e;
+        parts.splice(i, 1); i -= 2;
+      } else if (next && next.e - cur.s <= mergeCap) {
+        parts[i][1] = parts[i + 1][1];
+        parts.splice(i + 1, 1); i -= 1;
+      }
+    }
+
+    for (const [b, e] of parts) {
       const txt = z.slice(b, e).trim().replace(/^[，,。.！!？?；;：:、…·]+/, "");
       if (!txt) continue;
       const { s, e: eEnd } = span(b, e);
       const last = out[out.length - 1];
-      // 太短的碎块并回上一块（只并同一句内），否则字幕条上会出现点不中的 0.2 秒格子
-      if (eEnd - s < minDur && last && last._seg === e0 && last.z.length < maxChars * 1.8) {
+      if (eEnd - s < mergeDur && last && last._seg === e0 && last.z.length < 16) {
         last.e = Math.max(last.e, eEnd);
         last.z = (last.z + txt).trim();
         continue;
