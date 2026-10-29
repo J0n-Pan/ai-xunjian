@@ -640,8 +640,8 @@ function paintSubs() {
     // 全文交给悬停提示与选中后的按钮栏
     const pw = (w / 100) * W;
     const label = pw >= 34 ? esc(x.z) : "";
-    return `<div class="${cls}" data-i="${i}" style="left:calc(${l}% + 1px);width:calc(${w}% - 2px)"
-      title="${esc(`${fmt(x.s)}–${fmt(x.e)} · ${x.z}`)}">${label}</div>`;
+    // 不要挂 title：浏览器原生气泡会同时弹在光标下方，和自绘的 .subtip 撞成"两条字幕"
+    return `<div class="${cls}" data-i="${i}" style="left:calc(${l}% + 1px);width:calc(${w}% - 2px)">${label}</div>`;
   }).join("");
 }
 
@@ -1044,7 +1044,8 @@ $("subToggle").onclick = toggleSubCut;
 $("subClose").onclick = () => { S.subSel = null; paintSubs(); paintSubBar(); };
 
 // 细切之后一块只有十来像素，字放不下 —— 悬停立刻把「时间 + 全文」浮出来，
-// 不用等浏览器原生 title 的一秒延迟，也不必先点一下才知道自己要删哪句
+// 不必先点一下才知道自己要删哪句。字幕块不再挂 title，全局只留这一个气泡，
+// 否则浏览器原生气泡会在光标下方同时弹出，看起来像"两条字幕"。
 const subTip = document.createElement("div");
 subTip.className = "subtip";
 subTip.hidden = true;
