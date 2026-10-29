@@ -34,6 +34,23 @@ const FFPROBE = FFMPEG.replace(/ffmpeg(?=[^/\\]*$)/, "ffprobe");
 fs.mkdirSync(UPLOADS, { recursive: true });
 fs.mkdirSync(EPISODES, { recursive: true });
 
+// ────────────────────────── 崩溃留痕 ──────────────────────────
+// 以前进程一崩就什么都不剩：stderr 随终端一起没了，只能靠系统事件日志反推（2026-10-29 那次
+// 就是靠「虚拟内存不足 + DWM 0xc00001ad」才定位到 ffmpeg 吃 21GB）。
+// 这里把未捕获异常/未处理拒绝落盘到 <数据目录>/logs/studio-crash.log，并**保活**：
+// 本机单用户工具，崩掉一个请求不该让正在跑的任务全灭。
+const CRASH_LOG = path.join(HOME, "logs", "studio-crash.log");
+function logCrash(kind, err) {
+  const line = `\n[${new Date().toISOString()}] ${kind}\n${(err && (err.stack || err.message)) || String(err)}\n`;
+  try {
+    fs.mkdirSync(path.dirname(CRASH_LOG), { recursive: true });
+    fs.appendFileSync(CRASH_LOG, line);
+  } catch {}
+  process.stderr.write(line);
+}
+process.on("uncaughtException", (e) => logCrash("uncaughtException", e));
+process.on("unhandledRejection", (e) => logCrash("unhandledRejection", e));
+
 // ────────────────────────── .env 读写 ──────────────────────────
 function readEnv() {
   const out = {};
@@ -225,6 +242,34 @@ function pumpLog(job, chunk) {
  * opts.note      —— 「AI 剪辑」重跑时用户填的补充要求（拼进裁决提示词）
  * opts.rebaseTo  —— 重跑要把结果登记成第几版（0/缺省 = 首剪，登记 v1）
  */
+// 合片是**单任务**的：一个 1080p 全长合片就能吃满页面文件（实测 commit 21GB），
+// 两条同时跑会双双报 "Cannot allocate memory"（2026-10-29 11:29 实例），
+// 还会把系统虚拟内存榨干到 DWM 崩溃。所以真串行：跑着就排队，前一个退出再起下一个。
+let cutBusy = false;
+const cutWaiting = [];
+const acquireCut = () => { if (cutBusy) return false; cutBusy = true; return true; };
+const releaseCut = () => { cutBusy = false; pumpCutQueue(); };
+function pumpCutQueue() {
+  if (cutBusy) return;
+  const next = cutWaiting.shift();
+  if (next) next();
+}
+
+/** 排队跑一个吃内存的 ffmpeg 任务。fn 负责起子进程，并在结束时调 releaseCut()。 */
+function runExclusive(job, stageLabel, fn) {
+  const start = () => {
+    job.queued = false;
+    if (job.stage === "排队中") job.stage = stageLabel;
+    fn();
+  };
+  if (acquireCut()) { start(); return true; }
+  job.queued = true;
+  job.stage = "排队中";
+  job.logs.push(`排队中：还有一条素材在合片（本机内存只够跑一条），前一个结束后自动开始\n`);
+  cutWaiting.push(start);
+  return false;
+}
+
 function startCut(name, file, opts = {}) {
   const job = newJob(name);
   job.mode = opts.rebaseTo ? "rebase" : "cut";
@@ -238,41 +283,52 @@ function startCut(name, file, opts = {}) {
   const extra = {};
   if (opts.note) extra.XUNJIAN_EXTRA_NOTE = String(opts.note);
   if (opts.rebaseTo) extra.XUNJIAN_REBASE_TO = String(opts.rebaseTo);
-  const child = run(NODE, ["firstcut/run.mjs", file, "--cut-only", "--name", name],
-    Object.keys(extra).length ? { env: { ...childEnv(), ...extra } } : {});
-  job.child = child;
-  child.stdout.on("data", (c) => pumpLog(job, c));
-  child.stderr.on("data", (c) => pumpLog(job, c));
-  child.on("error", (e) => { job.error = e.message; job.running = false; job.done = true; });
-  child.on("close", (code) => {
-    job.running = false;
-    job.done = true;
-    job.exitCode = code;
-    job.finished = Date.now();
-    job.pct = code === 0 ? 100 : job.pct;
-    job.stage = code === 0 ? "待审核" : "失败";
-    if (code !== 0) job.error = job.error || "剪辑进程退出码 " + code;
-    // 日志落盘：服务重启/页面刷新后「处理日志」还能看到这次跑到了哪一步
-    try {
-      fs.mkdirSync(path.join(EPISODES, name, "work"), { recursive: true });
-      fs.writeFileSync(path.join(EPISODES, name, "work/run.log"), job.logs.join(""));
-    } catch {}
-    // 重跑成功 → 只留最近 3 版，别让磁盘无限涨（删掉的清单进日志，事后能查）
-    if (code === 0 && opts.rebaseTo) {
+
+  const launch = () => {
+    job.queued = false;
+    if (job.stage === "排队中") { job.stage = "读取素材"; job.pct = 3; }
+    const child = run(NODE, ["firstcut/run.mjs", file, "--cut-only", "--name", name],
+      Object.keys(extra).length ? { env: { ...childEnv(), ...extra } } : {});
+    job.child = child;
+    child.stdout.on("data", (c) => pumpLog(job, c));
+    child.stderr.on("data", (c) => pumpLog(job, c));
+    child.on("error", (e) => {
+      job.error = e.message; job.running = false; job.done = true;
+      releaseCut();
+    });
+    child.on("close", (code) => {
+      job.running = false;
+      job.done = true;
+      job.exitCode = code;
+      job.finished = Date.now();
+      job.pct = code === 0 ? 100 : job.pct;
+      job.stage = code === 0 ? "待审核" : "失败";
+      if (code !== 0) job.error = job.error || "剪辑进程退出码 " + code;
+      // 日志落盘：服务重启/页面刷新后「处理日志」还能看到这次跑到了哪一步
       try {
-        const pr = pruneVersions(name, 3);
-        if (pr.removed.length) {
-          job.logs.push(`\n  已清理旧版本（只留最近 3 版）：${pr.removed.join("、")}\n`);
-          fs.appendFileSync(path.join(EPISODES, name, "work/run.log"), job.logs.slice(-1)[0]);
-        }
+        fs.mkdirSync(path.join(EPISODES, name, "work"), { recursive: true });
+        fs.writeFileSync(path.join(EPISODES, name, "work/run.log"), job.logs.join(""));
       } catch {}
-    }
-    try {
-      const m = readMeta(name);
-      if (m) writeMeta(name, { ...m, lastExit: code, lastError: code === 0 ? null : (job.error || "退出码 " + code) });
-    } catch {}
-    try { finalizeExport(name); } catch (e) { job.error = String(e.message || e); }
-  });
+      // 重跑成功 → 只留最近 3 版，别让磁盘无限涨（删掉的清单进日志，事后能查）
+      if (code === 0 && opts.rebaseTo) {
+        try {
+          const pr = pruneVersions(name, 3);
+          if (pr.removed.length) {
+            job.logs.push(`\n  已清理旧版本（只留最近 3 版）：${pr.removed.join("、")}\n`);
+            fs.appendFileSync(path.join(EPISODES, name, "work/run.log"), job.logs.slice(-1)[0]);
+          }
+        } catch {}
+      }
+      try {
+        const m = readMeta(name);
+        if (m) writeMeta(name, { ...m, lastExit: code, lastError: code === 0 ? null : (job.error || "退出码 " + code) });
+      } catch {}
+      try { finalizeExport(name); } catch (e) { job.error = String(e.message || e); }
+      finally { releaseCut(); }   // 收尾完才放行下一个（finalizeExport 里也可能起 ffmpeg）
+    });
+  };
+
+  runExclusive(job, "读取素材", launch);
   return job;
 }
 
@@ -1268,20 +1324,29 @@ const server = http.createServer(async (req, res) => {
       const name = safeName(b.name);
       const j = newJob(name);
       j.mode = "reexport";
-      j.stage = "按决定重剪";
       j.pct = 40;
-      const child = run(NODE, ["firstcut/reexport.mjs", "--name", name]);
-      j.child = child;
-      child.stdout.on("data", (c) => pumpLog(j, c));
-      child.stderr.on("data", (c) => pumpLog(j, c));
-      child.on("close", (code) => {
-        j.running = false; j.done = true; j.exitCode = code; j.finished = Date.now();
-        if (code === 0) {
-          j.pct = 100; j.stage = "重剪完成";
-          try { finalizeExport(name); } catch (e) { j.error = String(e.message || e); }
-        } else { j.stage = "重剪失败"; j.error = "退出码 " + code; }
+      runExclusive(j, "按决定重剪", () => {
+        const child = run(NODE, ["firstcut/reexport.mjs", "--name", name]);
+        j.child = child;
+        child.stdout.on("data", (c) => pumpLog(j, c));
+        child.stderr.on("data", (c) => pumpLog(j, c));
+        child.on("error", (e) => {
+          j.error = e.message; j.running = false; j.done = true;
+          releaseCut();
+        });
+        child.on("close", (code) => {
+          j.running = false; j.done = true; j.exitCode = code; j.finished = Date.now();
+          if (code === 0) {
+            j.pct = 100; j.stage = "重剪完成";
+            try { finalizeExport(name); } catch (e) { j.error = String(e.message || e); }
+            finally { releaseCut(); }
+          } else {
+            j.stage = "重剪失败"; j.error = "退出码 " + code;
+            releaseCut();
+          }
+        });
       });
-      return json(res, 200, { ok: true, name });
+      return json(res, 200, { ok: true, name, queued: !!j.queued });
     }
 
     // ── 视频 ──

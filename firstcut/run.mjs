@@ -11,6 +11,7 @@ import { detectRetakes, detectStutters, detectFillers, findTier2, subtractRanges
 import { clipReviewItems } from "./review-clip.mjs";
 import { resolveNoteDirectives } from "./note-directive.mjs";
 import { homeOf } from "./home.mjs";
+import { buildCutFilter } from "./cutfilters.mjs";
 
 const ROOT = process.cwd();
 // 程序目录（ROOT）会被整体替换，工程数据在 HOME；两者在源码仓库里是同一个目录
@@ -1322,18 +1323,9 @@ fs.mkdirSync(path.join(EP, "hf/assets"), { recursive: true });
 // 对每段的音频两端加极短淡入淡出即可消除突跳;淡化落在被剪掉的静音一侧,不削弱正常字音。
 // 默认值见 rules.json segment.edgeFadeSec,可用 XUNJIAN_EDGE_FADE 覆盖(设 0 关闭)。
 const FADE = Math.max(0, Number(process.env.XUNJIAN_EDGE_FADE ?? R.segment.edgeFadeSec));
-const segFc = ([s, e], i) => {
-  const d = e - s;
-  const fade = FADE > 0 && d > FADE * 3
-    ? `,afade=t=in:st=0:d=${FADE.toFixed(3)},afade=t=out:st=${(d - FADE).toFixed(3)}:d=${FADE.toFixed(3)}`
-    : "";
-  return `[0:v]trim=${s}:${e},setpts=PTS-STARTPTS[v${i}];[0:a]atrim=${s}:${e},asetpts=PTS-STARTPTS${fade}[a${i}];`;
-};
-const fc = segs.map(segFc).join("\n")
-  + segs.map((_, i) => `[v${i}][a${i}]`).join("") + `concat=n=${segs.length}:v=1:a=1[vc][ac];\n`
-  + (Math.abs(SPEED - 1) < 1e-9
-    ? `[vc]null[vf];[ac]anull[af]`                      // 1.0x：不做任何重采样，避免 atempo 的额外音质损失
-    : `[vc]setpts=PTS/${SPEED}[vf];[ac]atempo=${SPEED}[af]`);
+// 单链 select 版滤镜图：N 段不再展开成 N 条 trim 分支（那些分支会把 commit 内存吃到 GB 级，
+// 见 cutfilters.mjs 顶部的事故记录）。边界淡化由 buildCutFilter 用 V 形 volume 还原。
+const fc = buildCutFilter(segs, { speed: SPEED, fade: FADE });
 if (FADE > 0) console.log(`  剪切边界淡化 ${(FADE * 1000).toFixed(0)}ms(消除拼接突跳与幻觉字幕)`);
 // 审核队列落盘：剪辑台读这个文件生成「时间轴标记 + 提问卡」，用户改的决定写进 overrides.json，
 // 再由 firstcut/reexport.mjs 按区间重剪 —— 全程不回模型，结论不会漂。
@@ -1352,21 +1344,32 @@ const fcPath = path.join(EP, "work/cutfc.txt");
 fs.writeFileSync(fcPath, fc);
 const camName = "cam-" + NAME + ".mp4";
 const cam = path.join(EP, "hf/assets", camName);
+// 先写 .part.mp4，成片探测通过才原子改名 —— 与 reexport.mjs 同一套。
+// 为什么首剪也要：ffmpeg 中途失败时留下的半截文件用的是正式名字，
+// 下一次重跑 -y 会把它截断重写，结果「版本档里记着 140s、磁盘上只有 22s」。
+const camPart = cam.replace(/\.mp4$/i, ".part.mp4");
+try { fs.unlinkSync(camPart); } catch {}
 const cutArgs = (fcArgs) => ["-y", "-v", "error", "-i", input, ...fcArgs,
   "-map", "[vf]", "-map", "[af]", "-c:v", "libx264", "-crf", `${R.encode.crf}`, "-preset", `${R.encode.preset}`,
-  "-pix_fmt", "yuv420p", "-g", `${R.encode.gopFrames}`, "-c:a", "aac", "-b:a", `${R.encode.audioBitrate}`, cam];
+  "-pix_fmt", "yuv420p", "-g", `${R.encode.gopFrames}`, "-c:a", "aac", "-b:a", `${R.encode.audioBitrate}`, camPart];
 let r = run(FFMPEG, cutArgs(["-filter_complex_script", fcPath]));
 if (r.status !== 0 && /Unrecognized option 'filter_complex_script'/.test(r.stderr || "")) {
   // ffmpeg 7.0 起废弃该选项,部分新构建(如 Windows choco 版)已移除 → 滤镜图改内联直传
   r = run(FFMPEG, cutArgs(["-filter_complex", fc.replace(/\n/g, "")]));
 }
-if (r.status !== 0) die("剪切失败: " + r.stderr?.slice(-300));
+if (r.status !== 0) {
+  try { fs.unlinkSync(camPart); } catch {}
+  die("剪切失败: " + r.stderr?.slice(-300));
+}
 
 step("响度归一 (loudnorm 单独一步)");
 const voice = path.join(EP, "work/voice-norm.wav");
-r = run(FFMPEG, ["-y", "-v", "error", "-i", cam, "-vn", "-af", `loudnorm=${R.encode.loudnorm}`, "-ar", "48000", voice]);
+r = run(FFMPEG, ["-y", "-v", "error", "-i", camPart, "-vn", "-af", `loudnorm=${R.encode.loudnorm}`, "-ar", "48000", voice]);
 if (r.status !== 0) die("loudnorm 失败");
-const dur = Number(run(FFPROBE, ["-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", cam]).stdout.trim());
+const dur = Number(run(FFPROBE, ["-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", camPart]).stdout.trim());
+if (!Number.isFinite(dur) || dur <= 0) { try { fs.unlinkSync(camPart); } catch {} die("成片时长探测失败，疑似合片被中断"); }
+try { fs.unlinkSync(cam); } catch {}
+fs.renameSync(camPart, cam);   // 从这一刻起才对本机版本扫描可见
 console.log(`  成片素材 ${dur.toFixed(1)}s → ${path.relative(ROOT, cam)}`);
 
 // ── 版本链登记 ──
