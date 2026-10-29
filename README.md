@@ -18,9 +18,13 @@
 
 ## 下载
 
-**Windows x64 免安装版**：[`AI-FirstCut-Studio-1.0.0-win-x64.zip`](https://github.com/J0n-Pan/ai-xunjian/releases/latest)
-（约 105 MB）—— 解压即用，内置 Node 22 / FFmpeg 6.1 / uv，**不用另装任何环境**；
-双击 `启动 AI初剪工作台.cmd` 即开。详见 [v1.0.0 发布说明](https://github.com/J0n-Pan/ai-xunjian/releases/tag/v1.0.0)。
+**Windows x64 安装程序**：[`AI-FirstCut-Studio-1.1.3-win-x64-Setup.exe`](https://github.com/J0n-Pan/ai-xunjian/releases/latest)
+（约 74 MB）—— **推荐**。装到旧文件夹上就是升级：程序文件整套换新，`episodes/`、`uploads/`、`exports/`、
+`.env`（API Key 与导出路径）和 `runtime/uv-cache` 全部原样保留，旧版还在跑也会自动停掉，桌面快捷方式可选。
+
+**Windows x64 免安装版**：[`AI-FirstCut-Studio-1.1.3-win-x64.zip`](https://github.com/J0n-Pan/ai-xunjian/releases/latest)
+（约 105 MB）—— 解压即用，不想装东西就用这个。两个包都内置 Node 22 / FFmpeg 6.1 / uv，
+**不用另装任何环境**。详见 [v1.1.3 发布说明](https://github.com/J0n-Pan/ai-xunjian/releases/tag/v1.1.3)。
 
 从源码跑见下面「② 这个东西怎么用」；只要初剪引擎（不带 React 编辑器）的话用快照仓库
 [`ai-firstcut`](https://github.com/J0n-Pan/ai-firstcut)，同一个包也发在那儿。
