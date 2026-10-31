@@ -24,6 +24,7 @@ const S = {
   rate: 1,                 // 播放倍速：跟着播放器走，切素材/切源都保留
   logOpen: false,          // 处理日志是否展开（展开才去拉完整日志）
   logText: "", logLines: [],
+  cost: null,              // 最近一轮的 API 花费（work/run-usage.json）
 };
 
 const KIND = {
@@ -57,6 +58,120 @@ function toast(msg, isErr) {
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => (el.className = "toast"), 2600);
 }
+
+// ───────────────────────── 本次花费 ─────────────────────────
+// 数据源：run.mjs 收尾写的 work/run-usage.json（经 /api/cost）。只做展示，不参与任何判断；
+// 拿不到就整块隐藏——记账是可选的，不能因为它坏了让版面闪一个空胶囊。
+const COST_TAG = {
+  retake: "重说裁决",
+  filler: "语气词裁决",
+  redundancy: "语义冗余扫描",
+  asrfix: "错字纠错",
+  "note-directive": "补充要求",
+};
+const cost2 = (v, d = 4) => Number(v || 0).toFixed(d);
+const tok2 = (n) => {
+  n = Number(n || 0);
+  return n >= 1000 ? `${(n / 1000).toFixed(1).replace(/\.0$/, "")}k` : String(n);
+};
+const when2 = (iso) => {
+  const d = new Date(iso);
+  if (Number.isNaN(+d)) return "";
+  const p = (x) => String(x).padStart(2, "0");
+  return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+};
+
+async function loadCost() {
+  if (!S.name) { $("costWrap").hidden = true; return; }
+  let u = null;
+  try {
+    u = (await api(`/api/cost?name=${encodeURIComponent(S.name)}`)).usage;
+  } catch { u = null; }   // 老工程/记账失败：当作没有，不打扰用户
+  S.cost = u;
+  paintCost();
+}
+
+function paintCost() {
+  const wrap = $("costWrap"), btn = $("costPill"), val = $("costVal"), pop = $("costPop");
+  const u = S.cost;
+  // 跑批中：账本还没写完（首剪）或写的是上一轮（重跑），显示金额都会误导 —— 统一占位
+  if (S.running) {
+    wrap.hidden = false;
+    btn.classList.add("load");
+    val.textContent = "计费中";
+    pop.hidden = true;
+    btn.classList.remove("on");
+    btn.setAttribute("aria-expanded", "false");
+    return;
+  }
+  btn.classList.remove("load");
+  if (!u || !u.total) { wrap.hidden = true; pop.hidden = true; return; }
+  wrap.hidden = false;
+  val.textContent = `¥${cost2(u.total, u.total < 0.1 ? 4 : 3)}`;
+
+  // 明细：转写 + 各类裁决，按金额从大到小（用户第一眼看到的就是最贵的那个）
+  const rows = [];
+  const asrTxt = (u.asr || []).map((a) => `${Number(a.seconds).toFixed(1)}s`).join(" + ");
+  if (u.asrCost > 0 || (u.asr || []).length) {
+    rows.push({ n: "语音转写", t: asrTxt || "—", v: u.asrCost });
+  }
+  for (const r of u.llm || []) {
+    rows.push({
+      n: COST_TAG[r.tag] || r.tag,
+      t: `${tok2(r.in)}→${tok2(r.out)}`,
+      v: r.cost,
+    });
+  }
+  rows.sort((a, b) => b.v - a.v);
+  const total = Math.max(u.total, 1e-9);
+  const llmPct = Math.max(0, Math.min(100, (u.llmCost / total) * 100));
+  const cache = (u.llm || []).reduce((a, r) => a + (r.cache || 0), 0);
+  const modeTxt = u.mode === "rebase" ? "重跑" : "首剪";
+
+  pop.innerHTML = `
+    <div class="cp-head">
+      <div class="cp-sum"><small>¥</small>${cost2(u.total)}</div>
+      <div class="cp-cnt">${u.total < 1 ? `≈ ${(u.total * 100).toFixed(1)} 分` : ""}</div>
+    </div>
+    <div class="cp-sub">${modeTxt} v${u.version || 1} · ${when2(u.at)} · ${esc(u.model || "—")}</div>
+    <div class="cp-bar"><i class="m" style="width:${llmPct.toFixed(1)}%"></i><i class="a" style="width:${(100 - llmPct).toFixed(1)}%"></i></div>
+    <div class="cp-rows">${rows.map((r) => `
+      <div class="cp-row"><span class="n">${esc(r.n)}</span><span class="t">${esc(r.t)}</span><span class="v">${cost2(r.v)}</span></div>`).join("")}
+    </div>
+    <div class="cp-sep"></div>
+    <div class="cp-foot">
+      <b>模型 ¥${cost2(u.llmCost)}</b> · <b>转写 ¥${cost2(u.asrCost)}</b>${cache ? ` · 缓存命中 ${tok2(cache)} token` : ""}<br>
+      ${u.partial ? "本次运行中途结束，这里是已发生的部分。<br>" : ""}「应用并重剪」不调用模型，不计费。
+    </div>`;
+}
+
+$("costPill").onclick = (e) => {
+  e.stopPropagation();
+  const pop = $("costPop"), btn = $("costPill");
+  if (pop.hidden) {
+    paintCost();
+    pop.hidden = false;
+    btn.classList.add("on");
+    btn.setAttribute("aria-expanded", "true");
+  } else {
+    pop.hidden = true;
+    btn.classList.remove("on");
+    btn.setAttribute("aria-expanded", "false");
+  }
+};
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape" || $("costPop").hidden) return;
+  $("costPop").hidden = true;
+  $("costPill").classList.remove("on");
+  $("costPill").setAttribute("aria-expanded", "false");
+});
+document.addEventListener("click", (e) => {
+  const wrap = $("costWrap");
+  if (wrap.hidden || wrap.contains(e.target)) return;
+  $("costPop").hidden = true;
+  $("costPill").classList.remove("on");
+  $("costPill").setAttribute("aria-expanded", "false");
+});
 
 // ───────────────────────── 配置 ─────────────────────────
 async function loadConfig() {
@@ -192,6 +307,11 @@ function resetProjectView() {
   $("verSel").hidden = true; $("verList").hidden = true;
   $("rvHint").hidden = true;
   $("btnRetry").hidden = true;
+  // 花费是「这条素材」的，切工程/换素材时必须先收起来，等新工程的账本回来再显示
+  S.cost = null;
+  $("costWrap").hidden = true;
+  $("costPop").hidden = true;
+  $("costPill").classList.remove("on");
   $("stElapsed").textContent = "—";
   setLogs("");
   $("rlist").innerHTML = `<div class="emptyv">
@@ -351,6 +471,7 @@ async function runCut() {
     await postJSON("/api/run", { file: S.file, name: S.name });
     S.running = true;
     S.mode = "cut";
+    paintCost();               // 顶部立刻切成「计费中」，别让上一轮的金额挂在那儿
     setStatus("启动中", "● 运行中", "warn");
     pollStart();
   } catch (e) {
@@ -394,6 +515,7 @@ $("aiGo").onclick = async () => {
     closeAiModal();
     // 重跑=换了一套基线：清掉版面状态，等新结果回来再由 poll 填
     S.running = true; S.mode = "cut";
+    paintCost();
     S.tl = null; S.review = []; S.decisions = {}; S.active = null;
     S.subCuts = []; S.subSel = null; $("subs").innerHTML = ""; $("subBar").hidden = true;
     setStatus(`重跑中 v${r.from || 1} → v${r.to}`, "● 运行中", "warn");
@@ -540,6 +662,7 @@ async function loadTimeline(syncVer = true) {
   paintVersions();
   paintVerStats();
   paintExportPath();
+  await loadCost();
 }
 
 // 统计卡跟着「正在看的那一版」走；顺带在两者不一致时说明原因

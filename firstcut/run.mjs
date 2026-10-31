@@ -12,6 +12,7 @@ import { clipReviewItems, applyDecisions } from "./review-clip.mjs";
 import { resolveNoteDirectives } from "./note-directive.mjs";
 import { homeOf } from "./home.mjs";
 import { buildCutFilter } from "./cutfilters.mjs";
+import { beginUsage, noteAsr, finishUsage, guardExit } from "./usage.mjs";
 
 const ROOT = process.cwd();
 // 程序目录（ROOT）会被整体替换，工程数据在 HOME；两者在源码仓库里是同一个目录
@@ -109,6 +110,18 @@ const REBASE_TO = Number(process.env.XUNJIAN_REBASE_TO || 0);
 const RETAKE_SIM_OPT = getOpt("--retake-sim", null);   // 未显式给出时用 rules.retake.sim
 const EP = path.join(HOME, "episodes", NAME);
 const step = (m) => console.log("\n▸ " + m);
+
+// ── 记账：这一轮到底花了多少钱 ──
+// 四个裁决点都是 spawn llm.mjs，子进程各自把 usage 追加到 XUNJIAN_USAGE_LOG（这里指到
+// work/llm-usage.jsonl）；云端转写在 stdout 打 ASR_USAGE 账单行，由 noteAsr 收集。
+// 收尾汇总成 work/run-usage.json，服务端 /api/cost 原样给前端。记账失败不影响剪辑。
+const USAGE = beginUsage(EP, {
+  rules: R,
+  model: (R.llm && R.llm.model) || "qwen-plus",
+  version: REBASE_TO || 1,
+  mode: REBASE_TO ? "rebase" : "cut",
+});
+guardExit(USAGE);
 const run = (cmd, a, opts = {}) => spawnSync(cmd, a, { encoding: "utf8", maxBuffer: 64e6, ...opts });
 const die = (m) => { console.error("✗ " + m); process.exit(1); };
 // 转写子进程环境:离线/代理环境下 huggingface_hub 会去校验模型 etag,走代理常被 502 拦掉,
@@ -194,6 +207,7 @@ const runCapsPy = (argv, extraEnv = {}) => {
 const transcribeCaps = (wav, capsOut, segsOut) => {
   if (ASR_PROVIDER === "cloud") {
     const r1 = runPy([path.join(ROOT, "firstcut/asr_cloud.py"), wav, segsOut], {});
+    noteAsr(USAGE, r1.stdout);   // 这一趟是单独计费的，账单不能漏
     if (r1.status !== 0) return r1;
     // asr_and_caps.py 内建的 replay 入口：从句段 JSON 重建字幕，跳过 whisper。
     return runCapsPy([path.join(ROOT, "firstcut/asr_and_caps.py"), wav, capsOut], { XUNJIAN_BREAK_FROM_SEGS: segsOut });
@@ -374,6 +388,7 @@ if (!NO_RETAKE) {
   // VAD 分段全被合并(13 段→1 段),下游重说/卡壳检测就会空转。热词只用于成片字幕那一步。
   // 云端模式下这个顾虑不存在（paraformer 不做 initial_prompt 注入），参数保留只为兼容 local。
   const ra = transcribeRaw(rawWav, rawSegsPath, { XUNJIAN_ASR_HOTWORDS: "off" });
+  noteAsr(USAGE, ra.stdout);
   if (ra.status !== 0) console.log(`  ⚠️ 原片转写失败: ${asrFail(ra)}`);
   if (ra.status === 0 && fs.existsSync(rawSegsPath)) {
     const rawSegs = RAW_SEGS = JSON.parse(fs.readFileSync(rawSegsPath, "utf8"));
@@ -1500,8 +1515,10 @@ try {
 // ── --cut-only：剪辑层到此为止 ──
 if (CUT_ONLY) {
   const kept = segs.reduce((a, [s, e]) => a + e - s, 0);
+  const u = finishUsage(USAGE);
   console.log(`\n✅ 剪辑层完成（--cut-only）`);
   console.log(`   原片 ${rawDur.toFixed(1)}s → 成片 ${dur.toFixed(1)}s（保留 ${segs.length} 段，${(dur / rawDur * 100).toFixed(0)}%），提速 ${SPEED}x`);
+  if (u) console.log(`   本轮花费 ¥${u.total.toFixed(4)}（模型 ¥${u.llmCost.toFixed(4)} · 转写 ¥${u.asrCost.toFixed(4)}）`);
   console.log(`   成片: ${path.relative(ROOT, cam)}`);
   console.log(`   剪点清单: ${path.relative(ROOT, path.join(EP, "work/retake-report.json"))} · 剪切计划: work/cut-plan.json`);
   process.exit(0);
@@ -1518,6 +1535,7 @@ run(FFMPEG, ["-y", "-v", "error", "-i", voice, "-ac", "1", "-ar", "16000", asrIn
 // cloud：一次云端转写拿 IR，再用 asr_and_caps.py 的 replay 入口在本地断行（不二次计费）。
 const capsSegsPath = path.join(EP, "work/caps-segs.json");
 const asr = transcribeCaps(asrIn, capsPath, capsSegsPath);
+noteAsr(USAGE, asr.stdout);
 let caps = [];
 if (asr.status === 0 && fs.existsSync(capsPath)) {
   caps = JSON.parse(fs.readFileSync(capsPath, "utf8"));
@@ -1702,3 +1720,7 @@ console.log(`\n✅ 初剪完成！接下来去定剪：
    npm run dev
    打开 http://127.0.0.1:5178/editor.html → 左上角选「${NAME}」
    （AI 剪的每个元素都在时间轴上，拖谁改谁——你说了算）`);
+
+// 收尾记账（失败路径由 guardExit 兜底）
+const _u = finishUsage(USAGE);
+if (_u) console.log(`   本轮花费 ¥${_u.total.toFixed(4)}（模型 ¥${_u.llmCost.toFixed(4)} · 转写 ¥${_u.asrCost.toFixed(4)}）`);

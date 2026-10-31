@@ -1317,6 +1317,18 @@ const server = http.createServer(async (req, res) => {
     }
 
     // ── 剪辑计划（时间轴用）──
+    // 本轮花费：run.mjs 收尾写的 work/run-usage.json（记账失败时这个文件不存在，前端就不显示）
+    if (p === "/api/cost" && req.method === "GET") {
+      const name = safeName(u.searchParams.get("name") || "");
+      const f = path.join(EPISODES, name, "work/run-usage.json");
+      if (!name || !fs.existsSync(f)) return json(res, 200, { ok: true, usage: null });
+      try {
+        return json(res, 200, { ok: true, usage: JSON.parse(fs.readFileSync(f, "utf8")) });
+      } catch (e) {
+        return json(res, 200, { ok: true, usage: null, error: e.message });
+      }
+    }
+
     if (p === "/api/timeline" && req.method === "GET") {
       const name = safeName(u.searchParams.get("name") || "");
       const cp = path.join(EPISODES, name, "work/cut-plan.json");

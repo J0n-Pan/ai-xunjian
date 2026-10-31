@@ -27,6 +27,12 @@
       </div>
       <div class="grow"></div>
       <div class="pill"><i class="live off" id="keyDot"></i>API <b id="keyState">未配置</b></div>
+      <div class="costwrap" id="costWrap" hidden>
+        <button class="pill cost" id="costPill" aria-haspopup="true" aria-expanded="false">
+          本次花费 <b id="costVal">—</b><i class="arw"></i>
+        </button>
+        <div class="costpop" id="costPop" hidden></div>
+      </div>
       <button class="btn" id="btnAiCut" title="对原片重新跑一轮 AI 剪辑，可附一句补充要求">
         <svg viewBox="0 0 24 24"><path d="M12 3l1.9 4.6L18.5 9.5l-4.6 1.9L12 16l-1.9-4.6L5.5 9.5l4.6-1.9L12 3z"/><path d="M18 15l.9 2.1L21 18l-2.1.9L18 21l-.9-2.1L15 18l2.1-.9L18 15z"/></svg>AI 剪辑
       </button>

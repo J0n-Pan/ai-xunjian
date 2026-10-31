@@ -443,6 +443,22 @@
     "retry": 3,
     "timeoutMs": 900000
   },
+  "pricing": {
+    "_note": "只用于工作台顶部「本次花费」的估算，**不参与任何决策**。单价为阿里云百炼公示价（华北2 北京，单次输入 ≤128K），2026-10 核对。换模型/换厂商请同步改这里，否则显示的金额会偏。",
+    "_llmUnit": "元 / 百万 token",
+    "_cacheNote": "隐式缓存命中只收输入价的 20%（cachedInput 已按此写死，不是独立档位）。",
+    "llm": {
+      "input": 0.8,
+      "output": 2,
+      "cachedInput": 0.16
+    },
+    "_asrUnit": "元 / 秒",
+    "_asrNote": "paraformer-v2 文件转写。每月 1 号自动发 36,000 秒（10 小时）免费额度，免费额度不折算进这里的估算（一律按标价算，宁可高估）。",
+    "asr": {
+      "perSec": 0.00008,
+      "freeSecPerMonth": 36000
+    }
+  },
   "redundancy": {
     "_note": "语义冗余扫描(步3)：对含片头尾的完整句段列表一次性打标签(offtopic/slip/paraphrase/filler)。LLM 只表态，剪不剪由确定性护栏裁决——总时长≤maxRatio、连续删除≤maxRun、paraphrase 必须给有效且向后的 keepId(只删前保后)、单句跨度≤maxSegSec。v7 起：连续 slip/paraphrase 视为同一处重复的多次尝试，链尾保留、链前全删（只保留最终那一遍）；超长 slip 句段改用「句段内子切口」，只删前一遍。全片不剪的兜底：总时长超限即整批放弃。关闭:XUNJIAN_REDUNDANCY=off 或从 arbiter.kinds 移除 redundancy-scan。",
     "enabled": true,
