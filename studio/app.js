@@ -113,25 +113,25 @@ function paintCost() {
   const rows = [];
   const asrTxt = (u.asr || []).map((a) => `${Number(a.seconds).toFixed(1)}s`).join(" + ");
   if (u.asrCost > 0 || (u.asr || []).length) {
-    rows.push({ n: "语音转写", t: asrTxt || "—", v: u.asrCost });
+    rows.push({ n: "语音转写", t: asrTxt || "—", v: u.asrCost || 0 });
   }
   for (const r of u.llm || []) {
     rows.push({
       n: COST_TAG[r.tag] || r.tag,
       t: `${tok2(r.in)}→${tok2(r.out)}`,
-      v: r.cost,
+      v: r.cost || 0,
     });
   }
   rows.sort((a, b) => b.v - a.v);
   const total = Math.max(u.total, 1e-9);
-  const llmPct = Math.max(0, Math.min(100, (u.llmCost / total) * 100));
+  const llmPct = Math.max(0, Math.min(100, ((u.llmCost || 0) / total) * 100));
   const cache = (u.llm || []).reduce((a, r) => a + (r.cache || 0), 0);
   const modeTxt = u.mode === "rebase" ? "重跑" : "首剪";
 
   pop.innerHTML = `
     <div class="cp-head">
       <div class="cp-sum"><small>¥</small>${cost2(u.total)}</div>
-      <div class="cp-cnt">${u.total < 1 ? `≈ ${(u.total * 100).toFixed(1)} 分` : ""}</div>
+      <div class="cp-cnt">${u.total < 0.1 ? `≈ ${(u.total * 100).toFixed(1)} 分` : ""}</div>
     </div>
     <div class="cp-sub">${modeTxt} v${u.version || 1} · ${when2(u.at)} · ${esc(u.model || "—")}</div>
     <div class="cp-bar"><i class="m" style="width:${llmPct.toFixed(1)}%"></i><i class="a" style="width:${(100 - llmPct).toFixed(1)}%"></i></div>
@@ -145,32 +145,28 @@ function paintCost() {
     </div>`;
 }
 
-$("costPill").onclick = (e) => {
-  e.stopPropagation();
-  const pop = $("costPop"), btn = $("costPill");
-  if (pop.hidden) {
-    paintCost();
-    pop.hidden = false;
-    btn.classList.add("on");
-    btn.setAttribute("aria-expanded", "true");
-  } else {
-    pop.hidden = true;
-    btn.classList.remove("on");
-    btn.setAttribute("aria-expanded", "false");
-  }
-};
-document.addEventListener("keydown", (e) => {
-  if (e.key !== "Escape" || $("costPop").hidden) return;
+function closeCostPop() {
   $("costPop").hidden = true;
   $("costPill").classList.remove("on");
   $("costPill").setAttribute("aria-expanded", "false");
+}
+
+$("costPill").onclick = (e) => {
+  e.stopPropagation();
+  if ($("costPop").hidden) {
+    paintCost();
+    $("costPop").hidden = false;
+    $("costPill").classList.add("on");
+    $("costPill").setAttribute("aria-expanded", "true");
+  } else closeCostPop();
+};
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !$("costPop").hidden) closeCostPop();
 });
 document.addEventListener("click", (e) => {
   const wrap = $("costWrap");
   if (wrap.hidden || wrap.contains(e.target)) return;
-  $("costPop").hidden = true;
-  $("costPill").classList.remove("on");
-  $("costPill").setAttribute("aria-expanded", "false");
+  closeCostPop();
 });
 
 // ───────────────────────── 配置 ─────────────────────────
@@ -570,6 +566,7 @@ async function tick() {
         toast(st.error || "处理失败，看日志", true);
         setStatus("失败", "● 失败", "warn");
         $("btnRetry").hidden = false;
+        await loadCost();   // 失败也可能是跑了一半才挂的 —— 已经花掉的钱照样要让人看见
       }
     }
   } catch (e) {
